@@ -5,3 +5,6 @@ pymupdf
 pandas
 openpyxl
 python-multipart
+openai
+dotenv
+google.genai

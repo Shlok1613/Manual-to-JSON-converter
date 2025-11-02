@@ -1,6 +1,6 @@
 # backend/services/excel_json_converter.py
 import pandas as pd
-from openpyxl import Workbook # type: ignore
+from openpyxl import Workbook 
 from pathlib import Path
 import json
 

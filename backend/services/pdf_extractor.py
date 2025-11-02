@@ -1,7 +1,7 @@
 # backend/services/pdf_extractor.py
 from typing import List
-import pdfplumber # type: ignore
-import fitz  #  type: ignore
+import pdfplumber 
+import fitz  
 
 def extract_text_pdfplumber(file_stream) -> List[str]:
     """Extract text page-by-page using pdfplumber. Returns list of page texts."""
