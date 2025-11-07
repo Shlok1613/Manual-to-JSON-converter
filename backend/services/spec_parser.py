@@ -3,6 +3,7 @@ import json
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+import re
 
 # Load environment variables
 load_dotenv()
@@ -10,39 +11,71 @@ client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 def extract_specifications(text: str):
     """
-    Extracts structured specifications from product manual text using Gemini.
+    Extract structured specifications from product manual text using Gemini.
+    Falls back to text-based key–value parsing if JSON decoding fails.
     """
     prompt = f"""
-You are an expert in industrial product documentation.
-Extract all key specifications from the following text and return them
-as a clean JSON object only — no extra text or explanation.
+    You are an expert in interpreting industrial testing manuals.
 
-Use consistent keys like Rated Voltage, Frequency, Power, Current, Operating Range, etc.
+    The text below contains product testing instructions written by engineers.
+    They may be written inconsistently — sometimes as sentences, sometimes as tables.
 
-Example output:
-{{
-    "Rated Voltage": "230 V AC",
-    "Operating Range": "220–240 V",
-    "Frequency": "50 Hz"
-}}
+    Your task:
+    1. Identify every TEST STEP or ACTION described (e.g., "Switch on Switch 1 so Bulb 1 glows").
+    2. Interpret each step as a structured JSON entry with these keys:
+       - "Action" : what the user does (e.g., "Switch ON Switch 1")
+       - "Expected Behavior" : what happens (e.g., "Bulb 1 Glows")
+       - "Relay Status" : ON / OFF / No Change (if mentioned)
+       - "LED Indicator" : ON / OFF / Blinking / Not Mentioned
+       - "Delay" : timing or condition delay (if mentioned)
+       - "Condition Type" : Healthy, Faulty, Recovery, etc. (if applicable)
+    3. Also include general product specifications (voltage, delay, etc.) in a separate section.
 
-Text:
-{text[:6000]}
+    Return a single JSON object with two keys:
+    {{
+      "Specifications": {{ ... }},
+      "TestSteps": [
+         {{
+           "Action": "...",
+           "Expected Behavior": "...",
+           "Relay Status": "...",
+           "LED Indicator": "...",
+           "Delay": "...",
+           "Condition Type": "..."
+         }}
+      ]
+    }}
+
+    Respond ONLY in JSON format.
+    Text:
+    {text[:8000]}
 """
 
-    # Generate content using Gemini
+
+    # --- AI Call ---
     response = client.models.generate_content(
-        model="gemini-2.0-flash",  # or "gemini-1.5"
+        model="gemini-2.0-flash",
         contents=prompt,
         config=types.GenerateContentConfig(temperature=0)
     )
+    print("[Gemini Output Preview]:", response.text[:500])  # Debug log
 
     output_text = response.text.strip()
 
-    # Parse JSON if possible
+    # --- Try loading as JSON ---
     try:
         structured_data = json.loads(output_text)
     except json.JSONDecodeError:
-        structured_data = {"raw_output": output_text}
+        # --- Fallback: parse as simple key-value pairs ---
+        structured_data = {}
+        lines = [ln.strip() for ln in output_text.splitlines() if ln.strip()]
+        for line in lines:
+            # Example matches: "Under Voltage: 194–214 VAC", "Over Voltage - 254–274 VAC"
+            match = re.match(r"([\w\s%/()]+)\s*[:\-–]\s*(.+)", line)
+            if match:
+                key, val = match.groups()
+                structured_data[key.strip()] = val.strip()
+        if not structured_data:
+            structured_data = {"raw_output": output_text}
 
     return structured_data
