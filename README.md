@@ -1,23 +1,60 @@
-<h1>Bridging the Gap: Turning Human Know-How into JSON for Smart Manufacturing</h1>
-<h2>📘 Overview</h2>
-<p>This project converts unstructured industrial product manuals (PDFs) into structured JSON data for smart manufacturing applications. It uses AI to understand and standardize technical specifications written in different formats and styles.</p>
+# PDF to Excel/JSON Converter for Manufacturing Test Procedures
 
-<h2>⚙️ How It Works</h2>
-  <ul>
-    <li>PDF Upload: User uploads a typed product manual.</li>
-    <li>Text Extraction: System extracts text and tables using PDF parsing libraries.</li>
-    <li>Semantic Understanding: AI interprets varied phrases and meanings.</li>
-    <li>Normalization: Units and terms are standardized.</li>
-    <li>Output: Data is stored in Excel and converted into JSON format.</li>
-  </ul>
+This project provides a modular FastAPI backend that converts manufacturing work-instruction PDFs into structured Excel and JSON outputs.
 
-<h2>🧠 Tech Stack</h2>
-  <ul>
-    <li>Frontend: React.js</li>
-    <li>Backend: Python (FastAPI)</li>
-    <li>AI/NLP: OpenAI / Hugging Face</li>
-    <li>Libraries: pdfplumber, PyMuPDF, pandas, openpyxl</li>
-  </ul>
+## Implemented Pipeline
 
-<h2>🎯 Goal</h2>
-<p>To bridge human-authored knowledge and machine-readable data, enabling smarter and more automated manufacturing workflows.</p>
+1. **PDF Text Extraction** (`backend/services/pdf_extractor.py`)
+   - Primary: `pdfplumber`
+   - Fallback: `PyMuPDF`
+2. **Block Segmentation** (`backend/services/block_segmenter.py`)
+   - Detects process/machine boundaries with regex patterns.
+3. **Table Extraction** (`backend/services/table_extractor.py`)
+   - Parses `TABLE <n>` and LED sections.
+4. **Specification Parsing** (`backend/services/spec_parser.py`)
+   - Extracts voltage/range/percentage/delay values.
+5. **Step Extraction** (`backend/services/step_extractor.py`)
+   - Extracts numbered steps and inferred fields.
+6. **Confidence Scoring** (`backend/services/confidence_scorer.py`)
+   - Scores extracted entities and flags uncertain fields.
+7. **Excel Generation** (`backend/services/excel_writer.py`)
+   - Writes two sheets per machine: `Specifications`, `Test_Procedures`.
+8. **JSON Generation** (`backend/services/json_writer.py`)
+   - Writes structured JSON with confidence and flagged items.
+
+## API
+
+- `POST /extract-text/`
+  - Upload a PDF file and run full pipeline.
+  - Returns generated filenames and extraction quality summary.
+- `GET /download/{filename}`
+  - Downloads generated output files.
+
+## Run Locally
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+## Test
+
+```bash
+cd backend
+pytest -q
+```
+
+## Docker
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install -r requirements.txt
+COPY backend .
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+

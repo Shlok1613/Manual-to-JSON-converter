@@ -1,81 +1,83 @@
-import os
-import json
-from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from __future__ import annotations
+
 import re
+from typing import Dict, List
 
-# Load environment variables
-load_dotenv()
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+from .table_extractor import extract_tables
 
-def extract_specifications(text: str):
-    """
-    Extract structured specifications from product manual text using Gemini.
-    Falls back to text-based key–value parsing if JSON decoding fails.
-    """
-    prompt = f"""
-    You are an expert in interpreting industrial testing manuals.
-
-    The text below contains product testing instructions written by engineers.
-    They may be written inconsistently — sometimes as sentences, sometimes as tables.
-
-    Your task:
-    1. Identify every TEST STEP or ACTION described (e.g., "Switch on Switch 1 so Bulb 1 glows").
-    2. Interpret each step as a structured JSON entry with these keys:
-       - "Action" : what the user does (e.g., "Switch ON Switch 1")
-       - "Expected Behavior" : what happens (e.g., "Bulb 1 Glows")
-       - "Relay Status" : ON / OFF / No Change (if mentioned)
-       - "LED Indicator" : ON / OFF / Blinking / Not Mentioned
-       - "Delay" : timing or condition delay (if mentioned)
-       - "Condition Type" : Healthy, Faulty, Recovery, etc. (if applicable)
-    3. Also include general product specifications (voltage, delay, etc.) in a separate section.
-
-    Return a single JSON object with two keys:
-    {{
-      "Specifications": {{ ... }},
-      "TestSteps": [
-         {{
-           "Action": "...",
-           "Expected Behavior": "...",
-           "Relay Status": "...",
-           "LED Indicator": "...",
-           "Delay": "...",
-           "Condition Type": "..."
-         }}
-      ]
-    }}
-
-    Respond ONLY in JSON format.
-    Text:
-    {text[:8000]}
-"""
+VOLTAGE_SIMPLE = r"(\d+(?:\.\d+)?)\s*(?:VAC|V)"
+VOLTAGE_RANGE = r"(\d+(?:\.\d+)?)\s*(?:to|-|–)\s*(\d+(?:\.\d+)?)\s*(?:VAC|V)"
+PERCENTAGE = r"(\d+(?:\.\d+)?)\s*%"
+DELAY_SIMPLE = r"(\d+(?:\.\d+)?)\s*(?:sec|second|s|ms|min)\b"
 
 
-    # --- AI Call ---
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(temperature=0)
-    )
-    print("[Gemini Output Preview]:", response.text[:500])  # Debug log
+def _bucket_param_name(name: str) -> str:
+    nm = name.lower()
+    if "under" in nm or nm.startswith("uv"):
+        return "under_voltage"
+    if "over" in nm or nm.startswith("ov"):
+        return "over_voltage"
+    if "asym" in nm:
+        return "asymmetry"
+    if "on delay" in nm:
+        return "on_delay"
+    if "off delay" in nm:
+        return "off_delay"
+    return re.sub(r"\W+", "_", nm).strip("_")
 
-    output_text = response.text.strip()
 
-    # --- Try loading as JSON ---
-    try:
-        structured_data = json.loads(output_text)
-    except json.JSONDecodeError:
-        # --- Fallback: parse as simple key-value pairs ---
-        structured_data = {}
-        lines = [ln.strip() for ln in output_text.splitlines() if ln.strip()]
-        for line in lines:
-            # Example matches: "Under Voltage: 194–214 VAC", "Over Voltage - 254–274 VAC"
-            match = re.match(r"([\w\s%/()]+)\s*[:\-–]\s*(.+)", line)
-            if match:
-                key, val = match.groups()
-                structured_data[key.strip()] = val.strip()
-        if not structured_data:
-            structured_data = {"raw_output": output_text}
+def parse_specifications(block_text: str) -> Dict[str, object]:
+    """Stage 4: parse specification entities from prose + extracted tables."""
+    specs: Dict[str, object] = {
+        "reference_voltage": None,
+        "voltage_parameters": {},
+        "timing_parameters": {},
+        "raw_tables": extract_tables(block_text),
+    }
 
-    return structured_data
+    ref = re.search(r"(?:reference|rated|input)\s*voltage\s*[:\-]?\s*" + VOLTAGE_SIMPLE, block_text, re.IGNORECASE)
+    if ref:
+        specs["reference_voltage"] = f"{ref.group(1)} VAC"
+
+    for line in block_text.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+
+        kv = re.match(r"([A-Za-z0-9\-\s()/]+)\s*[:\-]\s*(.+)", clean)
+        if not kv:
+            continue
+        key, value = kv.group(1).strip(), kv.group(2).strip()
+        bucket = _bucket_param_name(key)
+
+        pct = re.search(PERCENTAGE, value, re.IGNORECASE)
+        vr = re.search(VOLTAGE_RANGE, value, re.IGNORECASE)
+        delay = re.search(DELAY_SIMPLE, value, re.IGNORECASE)
+
+        item = {"setting": pct.group(0) if pct else None, "range": None, "raw": value}
+        if vr:
+            item["range"] = f"{vr.group(1)} to {vr.group(2)} VAC"
+        if delay:
+            item["delay"] = delay.group(0)
+
+        if "delay" in bucket:
+            specs["timing_parameters"][bucket] = item
+        else:
+            specs["voltage_parameters"][bucket] = item
+
+    for table in specs["raw_tables"]:
+        for row in table.get("rows", []):
+            bucket = _bucket_param_name(str(row.get("parameter", "")))
+            if not bucket:
+                continue
+            row_item = {
+                "setting": row.get("setting") or None,
+                "range": row.get("range") or None,
+                "notes": row.get("notes") or "",
+            }
+            if "delay" in bucket:
+                specs["timing_parameters"].setdefault(bucket, row_item)
+            else:
+                specs["voltage_parameters"].setdefault(bucket, row_item)
+
+    return specs

@@ -1,39 +1,42 @@
-# backend/services/pdf_extractor.py
-from typing import List
-import pdfplumber 
-import fitz  
+from __future__ import annotations
 
-def extract_text_pdfplumber(file_stream) -> List[str]:
-    """Extract text page-by-page using pdfplumber. Returns list of page texts."""
-    pages = []
-    try:
-        with pdfplumber.open(file_stream) as pdf:
-            for p in pdf.pages:
-                pages.append(p.extract_text() or "")
-    except Exception:
-        # caller may fallback to fitz
-        raise
+from io import BytesIO
+from pathlib import Path
+from typing import List, Union
+
+import fitz
+import pdfplumber
+
+
+PdfInput = Union[Path, str, bytes]
+
+
+def _to_bytes(data: PdfInput) -> bytes:
+    if isinstance(data, bytes):
+        return data
+    return Path(data).read_bytes()
+
+
+def extract_text_pdfplumber(pdf_data: bytes) -> List[str]:
+    pages: List[str] = []
+    with pdfplumber.open(BytesIO(pdf_data)) as pdf:
+        for page in pdf.pages:
+            pages.append(page.extract_text() or "")
     return pages
 
-def extract_text_pymupdf(file_stream) -> List[str]:
-    """Fallback extraction using PyMuPDF (fitz)."""
-    pages = []
-    # fitz expects file-like or bytes; ensure we are reading bytes:
-    file_stream.seek(0)
-    data = file_stream.read()
-    doc = fitz.open(stream=data, filetype="pdf")
+
+def extract_text_pymupdf(pdf_data: bytes) -> List[str]:
+    pages: List[str] = []
+    doc = fitz.open(stream=pdf_data, filetype="pdf")
     for page in doc:
         pages.append(page.get_text("text") or "")
     return pages
 
-def extract_text(file_stream) -> List[str]:
-    """
-    Try pdfplumber first, fallback to PyMuPDF.
-    Returns list of page texts.
-    """
-    file_stream.seek(0)
+
+def extract_text(data: PdfInput) -> List[str]:
+    """Stage 1: extract page text with fallback to PyMuPDF."""
+    pdf_data = _to_bytes(data)
     try:
-        return extract_text_pdfplumber(file_stream)
+        return extract_text_pdfplumber(pdf_data)
     except Exception:
-        file_stream.seek(0)
-        return extract_text_pymupdf(file_stream)
+        return extract_text_pymupdf(pdf_data)

@@ -1,70 +1,54 @@
-# backend/main.py
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse
-from services.pdf_extractor import extract_text
-from services.spec_parser import extract_specifications
-from services.excel_template_writer import fill_template_excel
+from __future__ import annotations
+
 from pathlib import Path
-import pandas as pd, json
 
-app = FastAPI(title="Smart Mfg JSON - Backend")
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
-# Folders
-UPLOAD_DIR = Path("uploads")
-OUTPUT_DIR = Path("outputs")
-TEMPLATE_PATH = Path("templates/1M SPP SM175 AUTO FUNCTION All CatID.xlsx")
-UPLOAD_DIR.mkdir(exist_ok=True)
-OUTPUT_DIR.mkdir(exist_ok=True)
+from models.schemas import ExtractResponse
+from services.pipeline import process_pdf
+
+app = FastAPI(title="PDF to Excel/JSON Converter")
+
+BASE_DIR = Path(__file__).resolve().parent
+UPLOAD_DIR = BASE_DIR / "uploads"
+OUTPUT_DIR = BASE_DIR / "outputs"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @app.get("/")
-def root():
-    return {"status": "ok", "message": "Smart Mfg JSON backend running"}
+def root() -> dict:
+    return {"status": "ok", "message": "PDF extraction service ready"}
 
 
-@app.post("/extract-text/")
-async def extract_text_endpoint(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith(".pdf"):
+@app.post("/extract-text/", response_model=ExtractResponse)
+async def extract_text_endpoint(file: UploadFile = File(...)) -> ExtractResponse:
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-    # --- Save uploaded PDF ---
-    save_path = UPLOAD_DIR / file.filename
-    with open(save_path, "wb") as f:
-        f.write(await file.read())
+    pdf_path = UPLOAD_DIR / Path(file.filename).name
+    pdf_path.write_bytes(await file.read())
 
-    # --- Extract text ---
-    with open(save_path, "rb") as f:
-        pages = extract_text(f)
+    try:
+        results = process_pdf(pdf_path, OUTPUT_DIR)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Processing failed: {exc}") from exc
 
-    # --- Combine extracted text ---
-    full_text = "\n\n".join([p.strip() for p in pages if p.strip()])
+    return ExtractResponse(
+        filename=file.filename,
+        num_pages=results["num_pages"],
+        num_blocks=results["num_blocks"],
+        excel_files=results["excel_files"],
+        json_files=results["json_files"],
+        flagged_items=results["flagged_items"],
+        confidence_average=results["confidence"],
+    )
 
-    # --- Save extracted text for reference ---
-    safe_name = Path(file.filename).stem.replace(" ", "_").replace("/", "_").replace("\\", "_")
-    text_path = OUTPUT_DIR / f"{safe_name}.txt"
-    text_path.write_text(full_text, encoding="utf-8")
 
-    # --- Step 1: AI specification extraction ---
-    structured_data = extract_specifications(full_text)
-
-    # --- Step 2: Determine product name ---
-    product_name = structured_data.get("Product", file.filename.replace(".pdf", ""))
-
-    # --- Step 3: Save structured Excel using the template ---
-    output_excel = OUTPUT_DIR / f"{product_name}_structured.xlsx"
-    fill_template_excel(TEMPLATE_PATH, output_excel, structured_data)
-
-    # --- Step 4: Save structured JSON as well ---
-    json_path = OUTPUT_DIR / f"{product_name}_structured.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(structured_data, f, indent=4, ensure_ascii=False)
-
-    # --- Step 5: Return API response ---
-    return JSONResponse({
-        "filename": file.filename,
-        "num_pages": len(pages),
-        "product": product_name,
-        "structured_data": structured_data,
-        "excel_file": str(output_excel.name),
-        "json_file": str(json_path.name),
-    })
+@app.get("/download/{filename}")
+def download_file(filename: str):
+    file_path = OUTPUT_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path=file_path, filename=file_path.name)
