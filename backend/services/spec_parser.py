@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 import re
+from google.genai.errors import ClientError
 
 # Load environment variables
 load_dotenv()
@@ -53,29 +54,37 @@ def extract_specifications(text: str):
 
 
     # --- AI Call ---
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(temperature=0)
-    )
-    print("[Gemini Output Preview]:", response.text[:500])  # Debug log
-
-    output_text = response.text.strip()
-
-    # --- Try loading as JSON ---
     try:
-        structured_data = json.loads(output_text)
-    except json.JSONDecodeError:
-        # --- Fallback: parse as simple key-value pairs ---
-        structured_data = {}
-        lines = [ln.strip() for ln in output_text.splitlines() if ln.strip()]
-        for line in lines:
-            # Example matches: "Under Voltage: 194–214 VAC", "Over Voltage - 254–274 VAC"
-            match = re.match(r"([\w\s%/()]+)\s*[:\-–]\s*(.+)", line)
-            if match:
-                key, val = match.groups()
-                structured_data[key.strip()] = val.strip()
-        if not structured_data:
-            structured_data = {"raw_output": output_text}
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0)
+        )
+        print("[Gemini Output Preview]:", response.text[:500])  # Debug log
+
+        output_text = response.text.strip()
+
+        # --- Try loading as JSON ---
+        try:
+            structured_data = json.loads(output_text)
+        except json.JSONDecodeError:
+            # --- Fallback: parse as simple key-value pairs ---
+            structured_data = {}
+            lines = [ln.strip() for ln in output_text.splitlines() if ln.strip()]
+            for line in lines:
+                # Example matches: "Under Voltage: 194–214 VAC", "Over Voltage - 254–274 VAC"
+                match = re.match(r"([\w\s%/()]+)\s*[:\-–]\s*(.+)", line)
+                if match:
+                    key, val = match.groups()
+                    structured_data[key.strip()] = val.strip()
+            if not structured_data:
+                structured_data = {"raw_output": output_text}
+            
+    except ClientError as e:
+                # 🔴 DO NOT crash your API
+        return {
+            "error": "AI_QUOTA_EXCEEDED",
+            "message": "Gemini quota exhausted. Returning raw extracted text only."
+        }
 
     return structured_data
