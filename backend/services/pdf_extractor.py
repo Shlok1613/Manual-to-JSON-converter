@@ -4,6 +4,7 @@ PDF Text Extraction Service
 from pathlib import Path
 from typing import List, Union
 import logging
+import pdfplumber
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,7 @@ PdfInput = Union[Path, str]
 
 def extract_text_pdfplumber(pdf_path: Path) -> List[str]:
     """Extract text using pdfplumber."""
-    import pdfplumber
+
     
     pages = []
     with pdfplumber.open(pdf_path) as pdf:
