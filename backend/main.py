@@ -7,6 +7,8 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 import logging
 import json
+from fastapi.staticfiles import StaticFiles
+
 
 from models.schemas import ExtractionResult, generate_extraction_id
 
@@ -21,6 +23,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # Define directories
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -34,21 +38,6 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 logger.info(f"Upload directory: {UPLOAD_DIR}")
 logger.info(f"Output directory: {OUTPUT_DIR}")
 METADATA_DIR.mkdir(exist_ok=True)
-
-
-@app.get("/")
-def root():
-    """Health check endpoint."""
-    return {
-        "status": "ok",
-        "message": "PDF Extraction Service is running",
-        "version": "1.0.0",
-        "features": [
-            "Unique extraction IDs",
-            "Database-ready structure",
-            "File tracking"
-        ]
-    }
 
 
 @app.post("/api/extract", response_model=ExtractionResult)
@@ -339,3 +328,7 @@ def health_check():
         "metadata_dir_exists": METADATA_DIR.exists(),
         "total_extractions": len(list(METADATA_DIR.glob("ext_*.json")))
     }
+
+@app.get("/")
+def serve_index():
+    return FileResponse(Path(__file__).parent / "static" / "index.html")
