@@ -1,0 +1,132 @@
+{
+  "extraction_id": "ext_345b7f12",
+  "original_filename": "FUnctional Testing WI_Five series.pdf",
+  "saved_as": "ext_345b7f12_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 14,
+  "machines": [
+    "MACHINE_1",
+    "MACHINE_2",
+    "MACHINE_3",
+    "MACHINE_4",
+    "MACHINE_5",
+    "MACHINE_6",
+    "SM301",
+    "SM500",
+    "MG63BF",
+    "DMS110",
+    "DMS12024",
+    "MACHINE_12",
+    "MACHINE_13",
+    "MACHINE_14"
+  ],
+  "machine_details": [
+    {
+      "machine": "MACHINE_1",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MACHINE_2",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MACHINE_3",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MACHINE_4",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MACHINE_5",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MACHINE_6",
+      "num_tables": 1,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "SM301",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "SM500",
+      "num_tables": 3,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MG63BF",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "DMS110",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "DMS12024",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MACHINE_12",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MACHINE_13",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MACHINE_14",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    }
+  ],
+  "status": "completed",
+  "uploaded_at": "2026-02-09T19:36:01.967269",
+  "processed_at": "2026-02-09T19:36:01.967283",
+  "text_files": [
+    "ext_345b7f12_extracted.txt",
+    "ext_345b7f12_summary.txt",
+    "ext_345b7f12_MACHINE_1.txt",
+    "ext_345b7f12_MACHINE_2.txt",
+    "ext_345b7f12_MACHINE_3.txt",
+    "ext_345b7f12_MACHINE_4.txt",
+    "ext_345b7f12_MACHINE_5.txt",
+    "ext_345b7f12_MACHINE_6.txt",
+    "ext_345b7f12_SM301.txt",
+    "ext_345b7f12_SM500.txt",
+    "ext_345b7f12_MG63BF.txt",
+    "ext_345b7f12_DMS110.txt",
+    "ext_345b7f12_DMS12024.txt",
+    "ext_345b7f12_MACHINE_12.txt",
+    "ext_345b7f12_MACHINE_13.txt",
+    "ext_345b7f12_MACHINE_14.txt"
+  ],
+  "excel_files": [],
+  "json_files": []
+}

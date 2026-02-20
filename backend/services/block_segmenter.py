@@ -14,13 +14,18 @@ logger = logging.getLogger(__name__)
 
 # Patterns that indicate a new section/machine is starting
 SECTION_PATTERNS = [
-    r"PROCESS:\s*(.+)",                    # "PROCESS: Functional Testing"
-    r"(SM\d+)\s+(.+Testing)",              # "SM301 Automated Functional Testing"
-    r"(.+)\s+VERIFICATION:",               # "UNDER VOLTAGE VERIFICATION:"
-    r"Functional\s+Test.*?for\s+(\w+)",    # "Functional Test for MAG03D0424"
-    r"PROCEDURE\s+FOR\s+(.+?):",           # "PROCEDURE FOR DMS110:"
+    r"^Neutral\s+Open\s+SPPR",                           # "Neutral Open SPPR"
+    r"^PROCESS:\s*(.+)",                                 # "PROCESS: Functional Testing"
+    r"^(SM\d+)\s+(.+Testing)",                           # "SM301 AUTOMATED FUNCTIONAL TESTING"
+    r"^(SM\d+)\s+Functional\s+Testing",                  # "SM500 Functional Testing"
+    r"^Process:\s+Functional\s+Testing\s+(SM\d+)",       # "Process: Functional Testing SM500_A"
+    r"^(SM\d+_[A-Z])\s+Functional\s+Testing",            # "SM501_B Functional Testing"
+    r"^PROCESS\s*:\s*Functional\s+Testing\s+DSMR",       # "PROCESS : Functional Testing DSMR"
+    r"^Functional\s+Testing\s+table\s+for\s+(\w+)",      # "Functional Testing table for Daikin"
+    r"^(DMS\d+)",                                         # "DMS110", "DMS120", etc.
+    r"^(MG\d+[A-Z]+)",                                    # "MG63BF", "MG53BH", etc.
+    r"^PROCEDURE\s+FOR\s+(.+?):",                        # "PROCEDURE FOR DMS110:"
 ]
-
 # Regex to find machine names in text
 MACHINE_NAME_PATTERN = re.compile(
     r'\b(SPPR|SM\d+|DSMR|DMS\d+|DMA\d+|MAG\w+|MAC\w+|MG\d+\w+|MD\d+\w+|MB\d+\w+)\b',
@@ -56,6 +61,96 @@ def find_machine_name(text: str, fallback: str = "UNKNOWN") -> str:
 
 
 def segment_blocks(full_text: str) -> List[Dict[str, str]]:
+    """
+    Split full PDF text into separate blocks for each machine/product.
+    
+    Improved version: Minimum block size to avoid over-segmentation.
+    
+    Args:
+        full_text: Complete extracted text from PDF
+    
+    Returns:
+        List of blocks
+    """
+    lines = full_text.splitlines()
+    blocks = []
+    
+    # Minimum characters for a valid block (to avoid tiny fragments)
+    MIN_BLOCK_SIZE = 1000
+    
+    # Start with first block
+    current_block = {
+        "machine": "MACHINE_1",
+        "header": "",
+        "text": ""
+    }
+    
+    for line in lines:
+        line_stripped = line.strip()
+        
+        # Skip empty lines but preserve them in text
+        if not line_stripped:
+            current_block["text"] += "\n"
+            continue
+        
+        # Check if this line is a section header
+        is_new_section = False
+        for pattern in SECTION_PATTERNS:
+            match = re.search(pattern, line_stripped, flags=re.IGNORECASE)
+            if match:
+                # Only start new section if current block is big enough
+                # OR if it's completely empty
+                if len(current_block["text"].strip()) > MIN_BLOCK_SIZE or not current_block["text"].strip():
+                    
+                    # Save previous block (if it has content)
+                    if current_block["text"].strip():
+                        blocks.append(current_block)
+                        logger.info(f"Completed block: {current_block['machine']} ({len(current_block['text'])} chars)")
+                    
+                    # Start new block
+                    header_text = match.group(0)
+                    machine_name = find_machine_name(
+                        header_text, 
+                        fallback=f"MACHINE_{len(blocks) + 1}"
+                    )
+                    
+                    current_block = {
+                        "machine": machine_name,
+                        "header": header_text,
+                        "text": line_stripped + "\n"
+                    }
+                    
+                    is_new_section = True
+                    logger.info(f"New section detected: {machine_name}")
+                    break
+                else:
+                    # Current block too small, keep adding to it
+                    break
+        
+        # If not a section header, add to current block
+        if not is_new_section:
+            current_block["text"] += line_stripped + "\n"
+    
+    # Don't forget the last block!
+    if current_block["text"].strip():
+        blocks.append(current_block)
+        logger.info(f"Completed final block: {current_block['machine']} ({len(current_block['text'])} chars)")
+    
+    # Clean up machine names (remove duplicates, number them)
+    machine_counts = {}
+    for block in blocks:
+        machine = block["machine"]
+        
+        # Count occurrences
+        machine_counts[machine] = machine_counts.get(machine, 0) + 1
+        
+        # If duplicate, add number
+        if machine_counts[machine] > 1:
+            block["machine"] = f"{machine}_{machine_counts[machine]}"
+    
+    logger.info(f"Segmentation complete: {len(blocks)} blocks found")
+    
+    return blocks
     """
     Split full PDF text into separate blocks for each machine/product.
     

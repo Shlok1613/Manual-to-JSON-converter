@@ -143,6 +143,35 @@ async def extract_pdf(file: UploadFile = File(...)):
         blocks = []
         num_machines = 0
         summary = f"Segmentation failed: {str(e)}"
+
+    # STEP 5.5: Extract tables and parse specifications (NEW!)
+    processed_blocks = []
+    try:
+        from services.table_extractor import extract_tables
+        from services.spec_parser import parse_specifications
+        
+        for block in blocks:
+            # Extract tables from this block
+            tables = extract_tables(block["text"])
+            
+            # Parse specifications
+            specs = parse_specifications(block["text"], tables)
+            
+            # Add to block data
+            block["tables"] = tables
+            block["specifications"] = specs
+            block["num_tables"] = len(tables)
+            
+            processed_blocks.append(block)
+            
+            logger.info(f"{block['machine']}: Found {len(tables)} tables, "
+                       f"{len(specs['voltage_parameters'])} voltage params, "
+                       f"{len(specs['timing_parameters'])} timing params")
+        
+    except Exception as e:
+        logger.error(f"Table/spec extraction failed: {e}")
+        # Use blocks without table data if extraction fails
+        processed_blocks = blocks
     
     # STEP 6: Save text files (NEW!)
     text_files = []
@@ -170,21 +199,50 @@ async def extract_pdf(file: UploadFile = File(...)):
     except Exception as e:
         logger.warning(f"Failed to save text files: {e}")
         # Don't fail the whole request
+
+# STEP 6.5: Generate Excel files (NEW!)
+    excel_files = []
+    try:
+        from services.excel_writer import generate_excel
+        
+        for block in processed_blocks:
+            if block.get("specifications"):
+                filename = generate_excel(
+                    extraction_id,
+                    block["machine"],
+                    block["specifications"],
+                    OUTPUT_DIR
+                )
+                excel_files.append(filename)
+                logger.info(f"Generated Excel: {filename}")
+        
+    except Exception as e:
+        logger.error(f"Excel generation failed: {e}")
+        # Don't fail the whole request if Excel generation fails
     
-    # STEP 7: Save extraction metadata (UPDATED!)
+# STEP 7: Save extraction metadata (UPDATED!)
     metadata = {
         "extraction_id": extraction_id,
         "original_filename": file.filename,
         "saved_as": pdf_filename,
         "num_pages": num_pages,
-        "num_machines": num_machines,  # NEW!
-        "machines": [block["machine"] for block in blocks],  # NEW!
+        "num_machines": num_machines,
+        "machines": [block["machine"] for block in processed_blocks],
+        "machine_details": [  # NEW!
+            {
+                "machine": block["machine"],
+                "num_tables": block.get("num_tables", 0),
+                "num_voltage_params": len(block.get("specifications", {}).get("voltage_parameters", {})),
+                "num_timing_params": len(block.get("specifications", {}).get("timing_parameters", {})),
+            }
+            for block in processed_blocks
+        ],
         "status": "completed",
         "uploaded_at": datetime.utcnow().isoformat(),
         "processed_at": datetime.utcnow().isoformat(),
-        "text_files": text_files,  # NEW!
-        "excel_files": [],  # Will populate in Week 2
-        "json_files": []    # Will populate in Week 2
+        "text_files": text_files,
+        "excel_files": excel_files,  # Will populate next
+        "json_files": []    # Will populate next
     }
     
     metadata_path = METADATA_DIR / f"{extraction_id}.json"
@@ -196,11 +254,11 @@ async def extract_pdf(file: UploadFile = File(...)):
         extraction_id=extraction_id,
         filename=file.filename,
         num_pages=num_pages,
-        num_machines=num_machines,  # NOW ACCURATE!
+        num_machines=num_machines,
         status="completed",
         created_at=datetime.utcnow(),
-        excel_files=[],  # Will populate in Week 2
-        json_files=[],   # Will populate in Week 2
+        excel_files=excel_files,  # NOW FILLED!
+        json_files=[],   # Will populate in Week 3
         download_url=f"/api/download/{extraction_id}"
     )
     
