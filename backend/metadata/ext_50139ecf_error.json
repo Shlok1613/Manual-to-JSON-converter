@@ -1,0 +1,7 @@
+{
+  "extraction_id": "ext_50139ecf",
+  "filename": "MOTOR-SIEMENS.pdf",
+  "status": "failed",
+  "error": "No module named 'pdfplumber'",
+  "timestamp": "2026-02-17T09:21:42.248568"
+}

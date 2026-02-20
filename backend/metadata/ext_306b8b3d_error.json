@@ -1,0 +1,7 @@
+{
+  "extraction_id": "ext_306b8b3d",
+  "filename": "FUnctional Testing WI_Five series.pdf",
+  "status": "failed",
+  "error": "No module named 'pdfplumber'",
+  "timestamp": "2026-02-17T09:32:13.903705"
+}

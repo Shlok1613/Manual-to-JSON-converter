@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Smart Manufacturing Knowledge Engine</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="min-h-screen text-white p-10"
+style="background: linear-gradient(135deg, #0f172a, #020617);">
+
+<h1 class="text-4xl font-bold text-cyan-400 mb-6">
+  Smart Manufacturing Knowledge Engine
+</h1>
+
+<!-- Analytics Section -->
+<div class="mb-8 bg-slate-800 p-6 rounded-2xl shadow-xl">
+  <h2 class="text-xl font-semibold mb-4 text-cyan-400">
+    System Analytics
+  </h2>
+  <div class="grid grid-cols-3 gap-4 text-center">
+    <div>
+      <p class="text-2xl font-bold" id="totalExtractions">0</p>
+      <p class="text-gray-400">Total Extractions</p>
+    </div>
+    <div>
+      <p class="text-2xl font-bold" id="totalMachines">0</p>
+      <p class="text-gray-400">Machines Processed</p>
+    </div>
+    <div>
+      <p class="text-2xl font-bold text-green-400">Active</p>
+      <p class="text-gray-400">System Status</p>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+
+  <!-- Upload Card -->
+  <div class="bg-slate-800 p-6 rounded-2xl shadow-xl">
+    <h2 class="text-xl font-semibold mb-4">Upload Manufacturing Manual</h2>
+
+    <input type="file" id="pdfFile" accept=".pdf"
+      class="mb-4 w-full text-black p-2 rounded">
+
+    <button onclick="uploadFile()"
+      class="bg-cyan-500 hover:bg-cyan-400 px-6 py-2 rounded-xl transition shadow-lg shadow-cyan-500/50 hover:shadow-cyan-400/80">
+      Extract Knowledge
+    </button>
+
+    <!-- Loader -->
+    <div id="loader" class="hidden mt-6 flex items-center gap-3">
+      <div class="w-6 h-6 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+      <span class="text-cyan-400">Extracting Knowledge...</span>
+    </div>
+
+    <div id="result" class="mt-4"></div>
+  </div>
+
+  <!-- History Card -->
+  <div class="bg-slate-800 p-6 rounded-2xl shadow-xl">
+    <h2 class="text-xl font-semibold mb-4">Extraction History</h2>
+    <div id="history"></div>
+  </div>
+
+</div>
+
+<script src="/static/script.js"></script>
+</body>
+</html>
