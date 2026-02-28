@@ -162,32 +162,8 @@ async def extract_pdf(file: UploadFile = File(...)):
         # Use blocks without table data if extraction fails
         processed_blocks = blocks
     
-    # STEP 6: Save text files (NEW!)
+    # STEP 6: Text files DISABLED (not needed - only Excel outputs)
     text_files = []
-    try:
-        # Save full extracted text
-        text_path = OUTPUT_DIR / f"{extraction_id}_extracted.txt"
-        text_path.write_text(full_text, encoding='utf-8')
-        text_files.append(text_path.name)
-        logger.info(f"Saved extracted text: {text_path.name}")
-        
-        # Save summary
-        summary_path = OUTPUT_DIR / f"{extraction_id}_summary.txt"
-        summary_path.write_text(summary, encoding='utf-8')
-        text_files.append(summary_path.name)
-        logger.info(f"Saved summary: {summary_path.name}")
-        
-        # Save individual machine blocks (NEW!)
-        for block in blocks:
-            block_filename = f"{extraction_id}_{block['machine']}.txt"
-            block_path = OUTPUT_DIR / block_filename
-            block_path.write_text(block['text'], encoding='utf-8')
-            text_files.append(block_filename)
-            logger.info(f"Saved block: {block_filename}")
-        
-    except Exception as e:
-        logger.warning(f"Failed to save text files: {e}")
-        # Don't fail the whole request
 
 # STEP 6.5: Generate Excel files (NEW!)
     excel_files = []

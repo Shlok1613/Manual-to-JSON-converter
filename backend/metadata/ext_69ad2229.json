@@ -1,0 +1,102 @@
+{
+  "extraction_id": "ext_69ad2229",
+  "original_filename": "FUnctional Testing WI_Five series.pdf",
+  "saved_as": "ext_69ad2229_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 9,
+  "machines": [
+    "SPPR",
+    "SM301",
+    "SM500",
+    "MG73BQ",
+    "MG63BF",
+    "MG63BF_2",
+    "MG53BQ",
+    "DMS120",
+    "DMS12024"
+  ],
+  "machine_details": [
+    {
+      "machine": "SPPR",
+      "num_tables": 2,
+      "num_voltage_params": 3,
+      "num_timing_params": 2
+    },
+    {
+      "machine": "SM301",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "SM500",
+      "num_tables": 2,
+      "num_voltage_params": 3,
+      "num_timing_params": 2
+    },
+    {
+      "machine": "MG73BQ",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MG63BF",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "MG63BF_2",
+      "num_tables": 3,
+      "num_voltage_params": 3,
+      "num_timing_params": 2
+    },
+    {
+      "machine": "MG53BQ",
+      "num_tables": 1,
+      "num_voltage_params": 3,
+      "num_timing_params": 2
+    },
+    {
+      "machine": "DMS120",
+      "num_tables": 1,
+      "num_voltage_params": 3,
+      "num_timing_params": 0
+    },
+    {
+      "machine": "DMS12024",
+      "num_tables": 2,
+      "num_voltage_params": 3,
+      "num_timing_params": 0
+    }
+  ],
+  "status": "completed",
+  "uploaded_at": "2026-02-25T06:24:45.059313",
+  "processed_at": "2026-02-25T06:24:45.059358",
+  "text_files": [
+    "ext_69ad2229_extracted.txt",
+    "ext_69ad2229_summary.txt",
+    "ext_69ad2229_SPPR.txt",
+    "ext_69ad2229_SM301.txt",
+    "ext_69ad2229_SM500.txt",
+    "ext_69ad2229_MG73BQ.txt",
+    "ext_69ad2229_MG63BF.txt",
+    "ext_69ad2229_MG63BF_2.txt",
+    "ext_69ad2229_MG53BQ.txt",
+    "ext_69ad2229_DMS120.txt",
+    "ext_69ad2229_DMS12024.txt"
+  ],
+  "excel_files": [
+    "ext_69ad2229_SPPR.xlsx",
+    "ext_69ad2229_SM301.xlsx",
+    "ext_69ad2229_SM500.xlsx",
+    "ext_69ad2229_MG73BQ.xlsx",
+    "ext_69ad2229_MG63BF.xlsx",
+    "ext_69ad2229_MG63BF_2.xlsx",
+    "ext_69ad2229_MG53BQ.xlsx",
+    "ext_69ad2229_DMS120.xlsx",
+    "ext_69ad2229_DMS12024.xlsx"
+  ],
+  "json_files": []
+}

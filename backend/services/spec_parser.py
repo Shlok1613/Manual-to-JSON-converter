@@ -416,50 +416,50 @@ def parse_specifications(text: str, tables: Optional[List[Dict]] = None) -> Dict
         }
     
     # Process table data if provided
+    # Process table data if provided
     if tables:
         for table in tables:
+            # Check if table has variants (multi-column format)
+            has_variants = len(table.get("headers", [])) > 0
+            
             for row in table.get("rows", []):
                 param_name = row.get("parameter", "").lower()
                 
-                # Under Voltage
-                if "under" in param_name and "voltage" in param_name:
-                    specs["voltage_parameters"]["under_voltage"] = {
+                # Prepare parameter data - handle both old and new formats
+                if has_variants:
+                    # NEW FORMAT: with variants
+                    param_data = {
+                        "setting": row.get("setting", ""),
+                        "variants": row.get("values", {}),  # Dict of {Variant_1: value, Variant_2: value}
+                        "raw": str(row.get("values", ""))
+                    }
+                else:
+                    # OLD FORMAT: simple setting/range
+                    param_data = {
                         "setting": row.get("setting", ""),
                         "range": row.get("range", ""),
                         "raw": row.get("raw_value", "")
                     }
+                
+                # Under Voltage
+                if "under" in param_name and "voltage" in param_name:
+                    specs["voltage_parameters"]["under_voltage"] = param_data
                 
                 # Over Voltage
                 elif "over" in param_name and "voltage" in param_name:
-                    specs["voltage_parameters"]["over_voltage"] = {
-                        "setting": row.get("setting", ""),
-                        "range": row.get("range", ""),
-                        "raw": row.get("raw_value", "")
-                    }
+                    specs["voltage_parameters"]["over_voltage"] = param_data
                 
                 # Asymmetry
                 elif "asym" in param_name:
-                    specs["voltage_parameters"]["asymmetry"] = {
-                        "setting": row.get("setting", ""),
-                        "range": row.get("range", ""),
-                        "raw": row.get("raw_value", "")
-                    }
+                    specs["voltage_parameters"]["asymmetry"] = param_data
                 
                 # ON Delay
                 elif "on" in param_name and "delay" in param_name:
-                    specs["timing_parameters"]["on_delay"] = {
-                        "setting": row.get("setting", ""),
-                        "range": row.get("range", ""),
-                        "raw": row.get("raw_value", "")
-                    }
+                    specs["timing_parameters"]["on_delay"] = param_data
                 
                 # OFF Delay
                 elif "off" in param_name and "delay" in param_name:
-                    specs["timing_parameters"]["off_delay"] = {
-                        "setting": row.get("setting", ""),
-                        "range": row.get("range", ""),
-                        "raw": row.get("raw_value", "")
-                    }
+                    specs["timing_parameters"]["off_delay"] = param_data
     
     # Store LED and relay states
     specs["led_indicators"] = led_states

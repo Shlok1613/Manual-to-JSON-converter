@@ -1,7 +1,7 @@
 {
-  "extraction_id": "ext_2b786c3b",
+  "extraction_id": "ext_480a45d4",
   "original_filename": "FUnctional Testing WI_Five series.pdf",
-  "saved_as": "ext_2b786c3b_FUnctional_Testing_WI_Five_series.pdf",
+  "saved_as": "ext_480a45d4_FUnctional_Testing_WI_Five_series.pdf",
   "num_pages": 20,
   "num_machines": 9,
   "machines": [
@@ -72,31 +72,31 @@
     }
   ],
   "status": "completed",
-  "uploaded_at": "2026-02-11T20:22:18.807906",
-  "processed_at": "2026-02-11T20:22:18.807916",
+  "uploaded_at": "2026-02-22T15:08:25.297726",
+  "processed_at": "2026-02-22T15:08:25.297737",
   "text_files": [
-    "ext_2b786c3b_extracted.txt",
-    "ext_2b786c3b_summary.txt",
-    "ext_2b786c3b_SPPR.txt",
-    "ext_2b786c3b_SM301.txt",
-    "ext_2b786c3b_SM500.txt",
-    "ext_2b786c3b_MG73BQ.txt",
-    "ext_2b786c3b_MG63BF.txt",
-    "ext_2b786c3b_MG63BF_2.txt",
-    "ext_2b786c3b_MG53BQ.txt",
-    "ext_2b786c3b_DMS120.txt",
-    "ext_2b786c3b_DMS12024.txt"
+    "ext_480a45d4_extracted.txt",
+    "ext_480a45d4_summary.txt",
+    "ext_480a45d4_SPPR.txt",
+    "ext_480a45d4_SM301.txt",
+    "ext_480a45d4_SM500.txt",
+    "ext_480a45d4_MG73BQ.txt",
+    "ext_480a45d4_MG63BF.txt",
+    "ext_480a45d4_MG63BF_2.txt",
+    "ext_480a45d4_MG53BQ.txt",
+    "ext_480a45d4_DMS120.txt",
+    "ext_480a45d4_DMS12024.txt"
   ],
   "excel_files": [
-    "ext_2b786c3b_SPPR.xlsx",
-    "ext_2b786c3b_SM301.xlsx",
-    "ext_2b786c3b_SM500.xlsx",
-    "ext_2b786c3b_MG73BQ.xlsx",
-    "ext_2b786c3b_MG63BF.xlsx",
-    "ext_2b786c3b_MG63BF_2.xlsx",
-    "ext_2b786c3b_MG53BQ.xlsx",
-    "ext_2b786c3b_DMS120.xlsx",
-    "ext_2b786c3b_DMS12024.xlsx"
+    "ext_480a45d4_SPPR.xlsx",
+    "ext_480a45d4_SM301.xlsx",
+    "ext_480a45d4_SM500.xlsx",
+    "ext_480a45d4_MG73BQ.xlsx",
+    "ext_480a45d4_MG63BF.xlsx",
+    "ext_480a45d4_MG63BF_2.xlsx",
+    "ext_480a45d4_MG53BQ.xlsx",
+    "ext_480a45d4_DMS120.xlsx",
+    "ext_480a45d4_DMS12024.xlsx"
   ],
   "json_files": []
 }

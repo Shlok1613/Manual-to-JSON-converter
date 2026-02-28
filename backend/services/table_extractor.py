@@ -1,11 +1,9 @@
 """
-Table Extraction Service
-Detects and extracts tables from PDF text.
-
-Tables in manufacturing PDFs typically have:
-- Header line (TABLE 1, TABLE 2, etc.)
-- Parameter rows (key: value format)
-- Multiple columns separated by spaces or |
+Table Extraction Service - IMPROVED VERSION
+Handles:
+1. Numbered tables: "TABLE 2 (PRODUCT SETTINGS...)"
+2. Unnumbered tables: "TABLE (PRODUCT SETTINGS...)"
+3. Actual column headers when present
 """
 import re
 from typing import List, Dict, Optional
@@ -16,335 +14,278 @@ logger = logging.getLogger(__name__)
 
 def detect_table_headers(text: str) -> List[Dict[str, any]]:
     """
-    Find all table headers in text.
+    Find all table headers in text - IMPROVED to handle unnumbered tables.
     
-    More strict: Only match actual table headers at start of line.
+    Detects patterns like:
+    - "TABLE 2 (LED INDICATIONS)"  ← numbered
+    - "TABLE (PRODUCT SETTINGS...)" ← unnumbered (NEW!)
     """
     headers = []
     lines = text.splitlines()
     
-    # Pattern: "TABLE X (...)" at start of line
+    # IMPROVED PATTERN: Optional table number
     table_pattern = re.compile(
-        r'^TABLE\s+(\d+)\s*(?:\((.+?)\))?',
+        r'^TABLE\s*(?:(\d+))?\s*(?:\((.+?)\))?',
         re.IGNORECASE
     )
     
     for line_num, line in enumerate(lines):
         line_stripped = line.strip()
         
-        # Must be at start of line and have content in parentheses
         match = table_pattern.match(line_stripped)
         if match:
-            table_num = match.group(1)
+            table_num = match.group(1) if match.group(1) else "UNNUMBERED"
             table_title = match.group(2) if match.group(2) else ""
             
             # Only add if it has a title or is followed by data
             if table_title or (line_num + 1 < len(lines) and ":" in lines[line_num + 1]):
+                table_id = f"TABLE_{table_num}" if table_num != "UNNUMBERED" else f"TABLE_UNNUMBERED_{len(headers)+1}"
+                
                 headers.append({
-                    "table_id": f"TABLE_{table_num}",
+                    "table_id": table_id,
                     "title": table_title.strip(),
                     "start_line": line_num,
                     "header_text": line_stripped
                 })
-                logger.info(f"Found table: TABLE {table_num} - {table_title}")
+                logger.info(f"Found table: {table_id} - {table_title}")
     
     return headers
+
+
+def extract_column_headers(text: str, table_start_line: int, max_lookback: int = 5) -> List[str]:
     """
-    Find all table headers in text.
+    NEW: Try to extract actual column headers if they exist.
     
-    Patterns we detect:
-    - "TABLE 1 (LED INDICATIONS)"
-    - "TABLE 2 (PRODUCT SETTINGS @ 415 VAC)"
-    - "LED / Parameters"
+    Looks for lines like:
+    "DMS110 DMS120 /DMS120-V DMA220"
     
-    Returns:
-        List of table locations with metadata
-        [{
-            "table_id": "TABLE_1",
-            "title": "LED INDICATIONS",
-            "start_line": 45,
-            "header_text": "TABLE 1 (LED INDICATIONS)"
-        }]
+    Returns list of column names or empty list.
     """
-    headers = []
     lines = text.splitlines()
     
-    # Pattern 1: "TABLE X (...)"
-    table_pattern = re.compile(
-        r'TABLE\s+(\d+)\s*(?:\((.+?)\))?',
-        re.IGNORECASE
-    )
-    
-    # Pattern 2: Headers with Parameters/Settings
-    param_header_pattern = re.compile(
-        r'(LED|Parameters?|Settings?)\s*[/\|]\s*(Parameters?|Settings?)',
-        re.IGNORECASE
-    )
-    
-    for line_num, line in enumerate(lines):
-        line_stripped = line.strip()
+    # Look backwards from table start
+    for i in range(max(0, table_start_line - max_lookback), table_start_line):
+        line = lines[i].strip()
         
-        # Check for TABLE X pattern
-        match = table_pattern.search(line_stripped)
-        if match:
-            table_num = match.group(1)
-            table_title = match.group(2) if match.group(2) else ""
-            
-            headers.append({
-                "table_id": f"TABLE_{table_num}",
-                "title": table_title.strip(),
-                "start_line": line_num,
-                "header_text": line_stripped
-            })
-            logger.info(f"Found table: TABLE {table_num} - {table_title}")
+        # Skip section headers
+        if line.upper().startswith(('TABLE', 'PARAMETERS', 'LED', 'SETTINGS', 'GOAL', 'NOTE')):
             continue
         
-        # Check for parameter header pattern
-        if param_header_pattern.search(line_stripped):
-            headers.append({
-                "table_id": f"PARAM_TABLE_{len(headers) + 1}",
-                "title": "Parameters",
-                "start_line": line_num,
-                "header_text": line_stripped
-            })
-            logger.info(f"Found parameter table at line {line_num}")
+        # Look for lines with multiple product codes (at least 2)
+        # Common patterns: MA..., SM..., DMS..., MG...
+        # Also handle /variants like "DMS120 /DMS120-V"
+        product_codes = re.findall(r'\b(?:MA|SM|DMS|DMA|MG|MAC|MD|MB)[\w-]+\b', line)
+        
+        if len(product_codes) >= 2:
+            # Deduplicate while preserving order
+            seen = set()
+            unique_codes = []
+            for code in product_codes:
+                # Remove variant suffix for comparison (e.g., DMS120-V → DMS120)
+                base_code = re.sub(r'-[A-Z]$', '', code)
+                if base_code not in seen:
+                    seen.add(base_code)
+                    unique_codes.append(code)
+            
+            logger.info(f"Found column headers: {unique_codes}")
+            return unique_codes
     
-    return headers
+    return []
 
 
-def parse_table_rows(text: str, start_line: int, max_lines: int = 50) -> List[Dict[str, str]]:
+def parse_table_rows(text: str, start_line: int, max_lines: int = 50) -> Dict[str, any]:
     """
-    Parse rows from a table starting at given line.
+    Parse rows from a table with STRICT parameter boundary detection.
     
-    Stops when:
-    - Empty line
-    - Next table header
-    - Next section header
-    - Max lines reached
+    IMPROVED: Can use actual column headers if found.
     
-    Each row typically looks like:
-    "Under Voltage (UV): 85.00%, 347 to 357 VAC"
-    
-    Parsed as:
-    {
-        "parameter": "Under Voltage (UV)",
-        "setting": "85.00%",
-        "range": "347 to 357 VAC"
-    }
+    Returns:
+        {
+            "headers": ["DMS110", "DMS120", ...] or ["Variant_1", "Variant_2", ...],
+            "rows": [...]
+        }
     """
     lines = text.splitlines()
-    rows = []
-    
-    # Start from line after header
     current_line = start_line + 1
     
-    # Check if this looks like a multi-column table (no colons in first few lines)
-    is_multi_column = True
-    for i in range(current_line, min(current_line + 3, len(lines))):
-        if i < len(lines) and ':' in lines[i]:
-            is_multi_column = False
-            break
+    # NEW: Try to extract actual column headers
+    actual_headers = extract_column_headers(text, start_line)
     
-    # If multi-column format (like your TABLE 2)
-    if is_multi_column:
-        logger.info("Detected multi-column table format")
-        
-        while current_line < len(lines) and current_line < start_line + max_lines:
-            line = lines[current_line].strip()
-            current_line += 1
-            
-            # Stop conditions
-            if not line:
-                continue
-            
-            if line.upper().startswith(('PROCESS:', 'PROCEDURE:', 'ACCESSORIES', 'CTQ', 'CHECK LIST', 'NOTE:', 'PHASE')):
-                break
-            
-            if re.match(r'^TABLE\s+\d+', line.upper()):
-                break
-            
-            # Parse multi-column row
-            # Try to extract parameter name (usually at start)
-            # Format: "Under Voltage 85.00% 318 to 328"
-            # or: "347 to 357 VAC 318 to 328 VAC ..."
-            
-            # Look for parameter names
-            param_match = re.match(r'^(Under\s+Voltage|Over\s+Voltage|Asymmetry|ON\s+Delay|OFF\s+Delay|UV/OV|On\s+delay|Off\s+delay)\s*(.+)?', line, re.IGNORECASE)
-            
-            if param_match:
-                param_name = param_match.group(1).strip()
-                rest = param_match.group(2).strip() if param_match.group(2) else ""
-                
-                rows.append({
-                    "parameter": param_name,
-                    "raw_value": rest,
-                    "setting": "",  # Will extract from rest
-                    "range": ""     # Will extract from rest
-                })
-            else:
-                # Continuation line (like "347 to 357 VAC ...")
-                # Add to previous row if exists
-                if rows:
-                    rows[-1]["raw_value"] += " " + line
-        
-        logger.info(f"Parsed {len(rows)} rows from multi-column table")
-        return rows
+    rows = []
+    max_variants = 0
     
-    # Patterns for key-value extraction
-    # Pattern: "Key: value1, value2"
-    kv_pattern = re.compile(
-        r'^([^:]+):\s*(.+)$'
-    )
-    
-    # Pattern for multi-column tables (using |)
-    column_pattern = re.compile(
-        r'\|'
-    )
+    # Collect all rows
+    temp_rows = []
+    current_param = None
+    current_setting = None
+    accumulated_values = []
+    lines_since_param = 0
     
     while current_line < len(lines) and current_line < start_line + max_lines:
         line = lines[current_line].strip()
         current_line += 1
         
         # Stop conditions
-# Stop conditions
         if not line:
-            continue  # Skip empty lines but keep going
-        
-        # Stop if we hit a new major section
-        if line.upper().startswith(('PROCESS:', 'PROCEDURE:', 'ACCESSORIES REQUIRED', 'CTQ', 'CHECK LIST')):
-            break
-        
-        # Stop if we hit a new table header (but not TABLE in middle of text)
-        if re.match(r'^TABLE\s+\d+', line.upper()):
-            break
-        
-        # Skip note lines but don't stop
-        if line.upper().startswith('NOTE:'):
+            lines_since_param += 1
+            if lines_since_param > 2:
+                if current_param:
+                    temp_rows.append({
+                        "parameter": current_param,
+                        "setting": current_setting or "",
+                        "value_list": accumulated_values.copy()
+                    })
+                    max_variants = max(max_variants, len(accumulated_values))
+                    current_param = None
             continue
         
-        # Try key-value pattern
-        match = kv_pattern.match(line)
-        if match:
-            key = match.group(1).strip()
-            value = match.group(2).strip()
-            
-            # Try to split value into setting and range
-            # Example: "85.00%, 347 to 357 VAC" → setting="85.00%", range="347 to 357 VAC"
-            value_parts = [v.strip() for v in value.split(',')]
-            
-            row = {
-                "parameter": key,
-                "raw_value": value
-            }
-            
-            if len(value_parts) >= 1:
-                row["setting"] = value_parts[0]
-            
-            if len(value_parts) >= 2:
-                row["range"] = value_parts[1]
-            
-            if len(value_parts) >= 3:
-                row["notes"] = value_parts[2]
-            
-            rows.append(row)
+        if line.upper().startswith(('PROCESS:', 'PROCEDURE:', 'NOTE:', 'ACCESSORIES', 'CTQ', 'CHECK LIST', 'VIRTUAL', 'PHASE', 'DEFAULT', 'B]', 'C]')):
+            break
+        
+        if re.match(r'^TABLE\s', line.upper()):
+            break
+        
+        # Check if this is a NEW parameter line
+        param_patterns = [
+            r'^(Under\s+Voltage|Over\s+Voltage|Asymmetry|ON\s+Delay|OFF\s+Delay|UV\s*/\s*OV\s+Hysteresis|LOW\s+CUT\s+OFF|HIGH\s+CUT\s+OFF|PHASE\s+FAIL|PHASE\s+REVERSE|NEUTRAL\s+FAIL|VIRTUAL\s+NEUTRAL)',
+        ]
+        
+        is_new_param = False
+        for pattern in param_patterns:
+            match = re.match(pattern, line, re.IGNORECASE)
+            if match:
+                # Save previous parameter
+                if current_param:
+                    temp_rows.append({
+                        "parameter": current_param,
+                        "setting": current_setting or "",
+                        "value_list": accumulated_values.copy()
+                    })
+                    max_variants = max(max_variants, len(accumulated_values))
+                
+                # Start new parameter
+                current_param = match.group(1).strip()
+                accumulated_values = []
+                lines_since_param = 0
+                
+                # Extract setting and values from same line
+                rest_of_line = line[match.end():].strip()
+                
+                # Look for setting (percentage or voltage)
+                setting_match = re.search(r'(\d+(?:\.\d+)?%|\d+VAC)', rest_of_line)
+                if setting_match:
+                    current_setting = setting_match.group(1)
+                    rest_of_line = rest_of_line[setting_match.end():].strip()
+                else:
+                    current_setting = None
+                
+                # Extract values
+                if rest_of_line:
+                    values = re.findall(r'(\d+(?:\.\d+)?(?:\s+to\s+\d+(?:\.\d+)?)?\s*(?:VAC|V|sec?|ms|%)?(?:\s*\([^)]+\))?)', rest_of_line, re.IGNORECASE)
+                    accumulated_values.extend([v.strip() for v in values if v.strip() and len(v.strip()) > 2])
+                
+                is_new_param = True
+                break
+        
+        if is_new_param:
             continue
         
-        # Try column-separated format
-        if column_pattern.search(line):
-            parts = [p.strip() for p in line.split('|')]
-            # Remove empty parts
-            parts = [p for p in parts if p]
+        # Continuation line
+        if current_param and lines_since_param < 3:
+            lines_since_param += 1
             
-            if len(parts) >= 2:
-                row = {
-                    "parameter": parts[0],
-                    "raw_value": ' | '.join(parts[1:])
-                }
-                
-                if len(parts) >= 2:
-                    row["setting"] = parts[1]
-                if len(parts) >= 3:
-                    row["range"] = parts[2]
-                if len(parts) >= 4:
-                    row["notes"] = parts[3]
-                
-                rows.append(row)
+            # Skip lines that look like new sections
+            if re.match(r'^[A-Z]{2,}[\s/:]', line):
+                continue
+            
+            # Extract values
+            values = re.findall(r'(\d+(?:\.\d+)?(?:\s+to\s+\d+(?:\.\d+)?)?\s*(?:VAC|V|sec?|ms|%)?(?:\s*\([^)]+\))?)', line, re.IGNORECASE)
+            
+            # Check for special keywords
+            if re.search(r'\b(?:NA|Enable|YES|Product\s+should\s+trip)\b', line, re.IGNORECASE):
+                special_match = re.search(r'\b(NA|Enable|YES|Product\s+should\s+trip[^.]+\.)', line, re.IGNORECASE)
+                if special_match:
+                    accumulated_values.append(special_match.group(1))
+            
+            accumulated_values.extend([v.strip() for v in values if v.strip() and len(v.strip()) > 2])
     
-    logger.info(f"Parsed {len(rows)} rows from table at line {start_line}")
-    return rows
+    # Save last parameter
+    if current_param:
+        temp_rows.append({
+            "parameter": current_param,
+            "setting": current_setting or "",
+            "value_list": accumulated_values.copy()
+        })
+        max_variants = max(max_variants, len(accumulated_values))
+    
+    # Create headers - use actual headers if found, otherwise Variant_N
+    if actual_headers and len(actual_headers) >= max_variants:
+        headers = actual_headers[:max_variants]
+    elif max_variants > 0:
+        headers = [f"Variant_{i+1}" for i in range(max_variants)]
+    else:
+        headers = []
+    
+    # Normalize rows
+    for temp_row in temp_rows:
+        values_dict = {}
+        
+        for i, value in enumerate(temp_row["value_list"]):
+            if i < len(headers):
+                values_dict[headers[i]] = value
+        
+        setting = temp_row["setting"]
+        if not setting and temp_row["value_list"]:
+            first_val = temp_row["value_list"][0]
+            if '%' in first_val or 'VAC' in first_val.upper():
+                setting = first_val
+        
+        rows.append({
+            "parameter": temp_row["parameter"],
+            "setting": setting,
+            "values": values_dict
+        })
+    
+    logger.info(f"Parsed {len(rows)} rows with {len(headers)} columns: {headers}")
+    
+    return {
+        "headers": headers,
+        "rows": rows
+    }
 
 
 def extract_tables(text: str) -> List[Dict[str, any]]:
     """
     Main function: Extract all tables from text.
-    
-    Process:
-    1. Find all table headers
-    2. Parse rows for each table
-    3. Return structured table data
-    
-    Args:
-        text: Full text block (e.g., one machine's text)
-    
-    Returns:
-        List of tables:
-        [{
-            "table_id": "TABLE_1",
-            "title": "LED INDICATIONS",
-            "rows": [
-                {"parameter": "Green", "setting": "Healthy", "range": "Continuous ON"},
-                ...
-            ]
-        }]
-    
-    Example:
-        tables = extract_tables(machine_text)
-        for table in tables:
-            print(f"{table['table_id']}: {len(table['rows'])} rows")
     """
-    # Find all table headers
     headers = detect_table_headers(text)
     
     if not headers:
         logger.warning("No tables found in text")
         return []
     
-    # Extract rows for each table
     tables = []
     for header in headers:
-        rows = parse_table_rows(text, header["start_line"])
+        rows_data = parse_table_rows(text, header["start_line"])
         
-        if rows:  # Only include tables that have data
+        if rows_data["rows"]:
             table = {
                 "table_id": header["table_id"],
                 "title": header["title"],
                 "header_text": header["header_text"],
-                "rows": rows,
-                "num_rows": len(rows)
+                "headers": rows_data.get("headers", []),
+                "rows": rows_data["rows"],
+                "num_rows": len(rows_data["rows"])
             }
             tables.append(table)
-            logger.info(f"Extracted {header['table_id']} with {len(rows)} rows")
+            logger.info(f"Extracted {header['table_id']} with {len(rows_data['rows'])} rows")
     
     logger.info(f"Total tables extracted: {len(tables)}")
     return tables
 
 
 def get_table_by_id(tables: List[Dict], table_id: str) -> Optional[Dict]:
-    """
-    Helper: Get a specific table by ID.
-    
-    Args:
-        tables: List of tables from extract_tables()
-        table_id: Table ID like "TABLE_1" or "TABLE_2"
-    
-    Returns:
-        Table dict or None if not found
-    
-    Example:
-        table2 = get_table_by_id(tables, "TABLE_2")
-        if table2:
-            print(table2['rows'])
-    """
+    """Helper: Get a specific table by ID."""
     for table in tables:
         if table["table_id"] == table_id:
             return table
@@ -352,21 +293,7 @@ def get_table_by_id(tables: List[Dict], table_id: str) -> Optional[Dict]:
 
 
 def get_table_row(table: Dict, parameter_name: str) -> Optional[Dict]:
-    """
-    Helper: Get a specific row from a table.
-    
-    Args:
-        table: Table dict from extract_tables()
-        parameter_name: Parameter to find (case-insensitive, partial match)
-    
-    Returns:
-        Row dict or None if not found
-    
-    Example:
-        uv_row = get_table_row(table2, "Under Voltage")
-        if uv_row:
-            print(f"UV Range: {uv_row['range']}")
-    """
+    """Helper: Get a specific row from a table."""
     param_lower = parameter_name.lower()
     
     for row in table.get("rows", []):

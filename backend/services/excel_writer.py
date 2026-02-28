@@ -1,10 +1,8 @@
 """
-Excel Writer Service
+Excel Writer Service - UPDATED WITH VARIANT SUPPORT
 Generates formatted Excel files from extracted specifications.
 
-Creates a 2-sheet workbook per machine:
-- Sheet 1: Specifications (voltage, timing, etc.)
-- Sheet 2: Test Procedures (coming in next step)
+NEW: Supports multi-variant parameters (Variant_1, Variant_2, etc.)
 """
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -29,27 +27,13 @@ BORDER_THIN = Border(
 
 
 def set_column_widths(ws, widths: Dict[str, int]):
-    """
-    Set column widths.
-    
-    Args:
-        ws: Worksheet
-        widths: Dict like {"A": 20, "B": 30, ...}
-    """
+    """Set column widths."""
     for col_letter, width in widths.items():
         ws.column_dimensions[col_letter].width = width
 
 
 def write_header_row(ws, row: int, headers: List[str], start_col: int = 1):
-    """
-    Write a formatted header row.
-    
-    Args:
-        ws: Worksheet
-        row: Row number
-        headers: List of header texts
-        start_col: Starting column (1-indexed)
-    """
+    """Write a formatted header row."""
     for i, header in enumerate(headers):
         col = start_col + i
         cell = ws.cell(row=row, column=col, value=header)
@@ -60,23 +44,13 @@ def write_header_row(ws, row: int, headers: List[str], start_col: int = 1):
 
 
 def write_subheader(ws, row: int, col: int, text: str, span_cols: int = 1):
-    """
-    Write a subheader (section title).
-    
-    Args:
-        ws: Worksheet
-        row: Row number
-        col: Column number
-        text: Header text
-        span_cols: Number of columns to span
-    """
+    """Write a subheader (section title)."""
     cell = ws.cell(row=row, column=col, value=text)
     cell.font = SUBHEADER_FONT
     cell.fill = SUBHEADER_FILL
     cell.alignment = Alignment(horizontal='left', vertical='center')
     cell.border = BORDER_THIN
     
-    # Merge cells if spanning
     if span_cols > 1:
         ws.merge_cells(
             start_row=row,
@@ -87,15 +61,7 @@ def write_subheader(ws, row: int, col: int, text: str, span_cols: int = 1):
 
 
 def write_data_row(ws, row: int, data: List[any], start_col: int = 1):
-    """
-    Write a data row with borders.
-    
-    Args:
-        ws: Worksheet
-        row: Row number
-        data: List of values
-        start_col: Starting column
-    """
+    """Write a data row with borders."""
     for i, value in enumerate(data):
         col = start_col + i
         cell = ws.cell(row=row, column=col, value=value)
@@ -105,13 +71,13 @@ def write_data_row(ws, row: int, data: List[any], start_col: int = 1):
 
 def create_specifications_sheet(ws, machine: str, specs: Dict):
     """
-    Create the Specifications sheet.
+    Create the Specifications sheet - WITH VARIANT SUPPORT!
     
     Layout:
     - Product information
     - Reference voltage
-    - Voltage parameters (UV, OV, Asymmetry)
-    - Timing parameters (ON delay, OFF delay)
+    - Voltage parameters (with variants if present)
+    - Timing parameters (with variants if present)
     """
     current_row = 1
     
@@ -132,53 +98,122 @@ def create_specifications_sheet(ws, machine: str, specs: Dict):
         ])
         current_row += 2
     
-    # Voltage parameters
+    # Voltage parameters - WITH VARIANT SUPPORT
     if specs.get("voltage_parameters"):
         write_subheader(ws, current_row, 1, "Voltage Parameters", span_cols=4)
         current_row += 1
         
-        # Headers
-        write_header_row(ws, current_row, [
-            "Parameter",
-            "Setting",
-            "Range",
-            "Notes"
-        ])
-        current_row += 1
+        # Check if ANY parameter has variants
+        has_variants = any("variants" in param_data for param_data in specs["voltage_parameters"].values())
         
-        # Data rows
-        for param_name, param_data in specs["voltage_parameters"].items():
-            write_data_row(ws, current_row, [
-                param_name.replace("_", " ").title(),
-                param_data.get("setting", ""),
-                param_data.get("range", ""),
-                param_data.get("notes", "")
+        if has_variants:
+            # NEW FORMAT: Show variants in rows
+            write_header_row(ws, current_row, [
+                "Parameter",
+                "Setting",
+                "Variant",
+                "Range"
             ])
             current_row += 1
+            
+            # Data rows - one row per variant
+            for param_name, param_data in specs["voltage_parameters"].items():
+                setting = param_data.get("setting", "")
+                
+                if "variants" in param_data and param_data["variants"]:
+                    # Write one row per variant
+                    for variant_name, variant_value in param_data["variants"].items():
+                        write_data_row(ws, current_row, [
+                            param_name.replace("_", " ").title(),
+                            setting,
+                            variant_name,
+                            variant_value
+                        ])
+                        current_row += 1
+                else:
+                    # No variants, write single row
+                    write_data_row(ws, current_row, [
+                        param_name.replace("_", " ").title(),
+                        setting,
+                        "N/A",
+                        param_data.get("range", "")
+                    ])
+                    current_row += 1
+        else:
+            # OLD FORMAT: Simple table without variants
+            write_header_row(ws, current_row, [
+                "Parameter",
+                "Setting",
+                "Range",
+                "Notes"
+            ])
+            current_row += 1
+            
+            for param_name, param_data in specs["voltage_parameters"].items():
+                write_data_row(ws, current_row, [
+                    param_name.replace("_", " ").title(),
+                    param_data.get("setting", ""),
+                    param_data.get("range", ""),
+                    param_data.get("notes", "")
+                ])
+                current_row += 1
         
         current_row += 1
     
-    # Timing parameters
+    # Timing parameters - WITH VARIANT SUPPORT
     if specs.get("timing_parameters"):
-        write_subheader(ws, current_row, 1, "Timing Parameters", span_cols=3)
+        write_subheader(ws, current_row, 1, "Timing Parameters", span_cols=4)
         current_row += 1
         
-        # Headers
-        write_header_row(ws, current_row, [
-            "Parameter",
-            "Setting",
-            "Range"
-        ])
-        current_row += 1
+        # Check if ANY parameter has variants
+        has_variants = any("variants" in param_data for param_data in specs["timing_parameters"].values())
         
-        # Data rows
-        for param_name, param_data in specs["timing_parameters"].items():
-            write_data_row(ws, current_row, [
-                param_name.replace("_", " ").title(),
-                param_data.get("setting", ""),
-                param_data.get("range", "")
+        if has_variants:
+            # NEW FORMAT: Show variants in rows
+            write_header_row(ws, current_row, [
+                "Parameter",
+                "Setting",
+                "Variant",
+                "Range"
             ])
             current_row += 1
+            
+            for param_name, param_data in specs["timing_parameters"].items():
+                setting = param_data.get("setting", "")
+                
+                if "variants" in param_data and param_data["variants"]:
+                    for variant_name, variant_value in param_data["variants"].items():
+                        write_data_row(ws, current_row, [
+                            param_name.replace("_", " ").title(),
+                            setting,
+                            variant_name,
+                            variant_value
+                        ])
+                        current_row += 1
+                else:
+                    write_data_row(ws, current_row, [
+                        param_name.replace("_", " ").title(),
+                        setting,
+                        "N/A",
+                        param_data.get("range", "")
+                    ])
+                    current_row += 1
+        else:
+            # OLD FORMAT
+            write_header_row(ws, current_row, [
+                "Parameter",
+                "Setting",
+                "Range"
+            ])
+            current_row += 1
+            
+            for param_name, param_data in specs["timing_parameters"].items():
+                write_data_row(ws, current_row, [
+                    param_name.replace("_", " ").title(),
+                    param_data.get("setting", ""),
+                    param_data.get("range", "")
+                ])
+                current_row += 1
         
         current_row += 1
     
@@ -199,27 +234,7 @@ def generate_excel(
     specs: Dict,
     output_dir: Path
 ) -> str:
-    """
-    Generate Excel file for one machine.
-    
-    Args:
-        extraction_id: Unique extraction ID
-        machine: Machine name (e.g., "SPPR", "SM301")
-        specs: Specifications dict from spec_parser
-        output_dir: Where to save the file
-    
-    Returns:
-        Filename of generated Excel file
-    
-    Example:
-        filename = generate_excel(
-            "ext_abc123",
-            "SPPR",
-            specifications,
-            Path("outputs")
-        )
-        # Returns: "ext_abc123_SPPR.xlsx"
-    """
+    """Generate Excel file for one machine."""
     # Create workbook
     wb = Workbook()
     
