@@ -351,6 +351,128 @@ def list_extractions(limit: int = 50):
         "extractions": extractions
     }
 
+@app.delete("/api/extraction/{extraction_id}")
+def delete_extraction(extraction_id: str, delete_pdf: bool = False):
+    """
+    Delete an extraction and all its generated files.
+    
+    Args:
+        extraction_id: Extraction ID (e.g., ext_abc12345)
+        delete_pdf: If True, also delete the uploaded PDF (default: False)
+    
+    Returns:
+        Success message with deleted file count
+    
+    Usage:
+        DELETE /api/extraction/ext_abc12345
+        DELETE /api/extraction/ext_abc12345?delete_pdf=true
+    """
+    
+    # Check if extraction exists
+    metadata_path = METADATA_DIR / f"{extraction_id}.json"
+    
+    if not metadata_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Extraction {extraction_id} not found"
+        )
+    
+    deleted_files = []
+    errors = []
+    
+    try:
+        # 1. Delete all Excel files in outputs/
+        for file_path in OUTPUT_DIR.glob(f"{extraction_id}_*"):
+            try:
+                file_path.unlink()
+                deleted_files.append(file_path.name)
+                logger.info(f"Deleted: {file_path.name}")
+            except Exception as e:
+                errors.append(f"Failed to delete {file_path.name}: {str(e)}")
+        
+        # 2. Delete metadata JSON
+        try:
+            metadata_path.unlink()
+            deleted_files.append(metadata_path.name)
+            logger.info(f"Deleted metadata: {metadata_path.name}")
+        except Exception as e:
+            errors.append(f"Failed to delete metadata: {str(e)}")
+        
+        # 3. Optionally delete uploaded PDF
+        if delete_pdf:
+            for pdf_path in UPLOAD_DIR.glob(f"{extraction_id}_*"):
+                try:
+                    pdf_path.unlink()
+                    deleted_files.append(pdf_path.name)
+                    logger.info(f"Deleted PDF: {pdf_path.name}")
+                except Exception as e:
+                    errors.append(f"Failed to delete PDF: {str(e)}")
+        
+        # Return result
+        return {
+            "extraction_id": extraction_id,
+            "status": "deleted",
+            "deleted_files": deleted_files,
+            "deleted_count": len(deleted_files),
+            "errors": errors if errors else None,
+            "pdf_deleted": delete_pdf
+        }
+        
+    except Exception as e:
+        logger.error(f"Delete extraction failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete extraction: {str(e)}"
+        )
+
+
+@app.delete("/api/extraction/{extraction_id}/file/{filename}")
+def delete_single_file(extraction_id: str, filename: str):
+    """
+    Delete a single Excel file from an extraction.
+    
+    Useful for removing specific machine Excel files without deleting entire extraction.
+    
+    Args:
+        extraction_id: Extraction ID
+        filename: Filename to delete (e.g., ext_abc12345_SPPR.xlsx)
+    
+    Usage:
+        DELETE /api/extraction/ext_abc12345/file/ext_abc12345_SPPR.xlsx
+    """
+    
+    # Verify file belongs to this extraction
+    if not filename.startswith(extraction_id):
+        raise HTTPException(
+            status_code=403,
+            detail="File does not belong to this extraction"
+        )
+    
+    file_path = OUTPUT_DIR / filename
+    
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"File {filename} not found"
+        )
+    
+    try:
+        file_path.unlink()
+        logger.info(f"Deleted file: {filename}")
+        
+        return {
+            "extraction_id": extraction_id,
+            "filename": filename,
+            "status": "deleted"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to delete file {filename}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete file: {str(e)}"
+        )
+
 
 @app.get("/health")
 def health_check():
