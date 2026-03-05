@@ -1,0 +1,642 @@
+{
+  "reference_voltage": {
+    "value": 475.0,
+    "unit": "VAC"
+  },
+  "voltage_parameters": {
+    "under_voltage": {
+      "setting": "85.00%",
+      "variants": {
+        "Variant_1": "318 to 328",
+        "Variant_2": "347 to 357 VAC",
+        "Variant_3": "318 to 328 VAC",
+        "Variant_4": "342 to 348 VAC (345VAC)"
+      },
+      "raw": "{'Variant_1': '318 to 328', 'Variant_2': '347 to 357 VAC', 'Variant_3': '318 to 328 VAC', 'Variant_4': '342 to 348 VAC (345VAC)'}"
+    },
+    "over_voltage": {
+      "setting": "475VAC",
+      "variants": {},
+      "raw": "{}"
+    },
+    "asymmetry": {
+      "setting": "90 to 98 VAC",
+      "variants": {
+        "Variant_1": "90 to 98 VAC",
+        "Variant_2": "90 to 98 VAC"
+      },
+      "raw": "{'Variant_1': '90 to 98 VAC', 'Variant_2': '90 to 98 VAC'}"
+    }
+  },
+  "timing_parameters": {
+    "on_delay": {
+      "setting": "",
+      "variants": {
+        "Variant_1": "2.8 to 3.2",
+        "Variant_2": "0124",
+        "Variant_3": "125 (For 126 cat id on delay is 10 sec)"
+      },
+      "raw": "{'Variant_1': '2.8 to 3.2', 'Variant_2': '0124', 'Variant_3': '125 (For 126 cat id on delay is 10 sec)'}"
+    },
+    "off_delay": {
+      "setting": "",
+      "variants": {
+        "Variant_1": "0124",
+        "Variant_2": "125",
+        "Variant_3": "500ms"
+      },
+      "raw": "{'Variant_1': '0124', 'Variant_2': '125', 'Variant_3': '500ms'}"
+    }
+  },
+  "led_indicators": [
+    {
+      "led": "IS",
+      "state": "ON",
+      "text": "is turn ON"
+    },
+    {
+      "led": "SLIDE",
+      "state": "ON",
+      "text": "SLIDE Turn ON"
+    },
+    {
+      "led": "INDICATION",
+      "state": "ON",
+      "text": "indication turns ON"
+    },
+    {
+      "led": "WILL",
+      "state": "ON",
+      "text": "will turns ON"
+    },
+    {
+      "led": "ALSO",
+      "state": "ON",
+      "text": "also turns on"
+    },
+    {
+      "led": "JIG",
+      "state": "ON",
+      "text": "jig turns ON"
+    },
+    {
+      "led": "JIG",
+      "state": "ON",
+      "text": "jig turns ON"
+    },
+    {
+      "led": "STARTS",
+      "state": "BLINKING",
+      "text": "starts blink"
+    },
+    {
+      "led": "STARTS",
+      "state": "BLINKING",
+      "text": "starts flash"
+    },
+    {
+      "led": "ON",
+      "state": "BLINKING",
+      "text": "ON Blink"
+    },
+    {
+      "led": "ON",
+      "state": "BLINKING",
+      "text": "ON Blink"
+    },
+    {
+      "led": "PHASE",
+      "state": "BLINKING",
+      "text": "Phase\nBlink"
+    },
+    {
+      "led": "ING",
+      "state": "BLINKING",
+      "text": "ing Blink"
+    },
+    {
+      "led": "APPLICABLE",
+      "state": "BLINKING",
+      "text": "Applicable Blink"
+    },
+    {
+      "led": "ALL",
+      "state": "BLINKING",
+      "text": "All LED Blink"
+    },
+    {
+      "led": "NF",
+      "state": "BLINKING",
+      "text": "NF Led Blink"
+    },
+    {
+      "led": "ALL",
+      "state": "BLINKING",
+      "text": "ALL LED BLINK"
+    }
+  ],
+  "relay_states": [
+    {
+      "state": "ON",
+      "text": "relay turns ON"
+    },
+    {
+      "state": "ON",
+      "text": "Relay turns ON"
+    },
+    {
+      "state": "ON",
+      "text": "Relay turns ON"
+    },
+    {
+      "state": "ON",
+      "text": "Relay turns ON"
+    },
+    {
+      "state": "ON",
+      "text": "relay turns ON"
+    },
+    {
+      "state": "ON",
+      "text": "relay turns ON"
+    },
+    {
+      "state": "OFF",
+      "text": "Relay turns OFF"
+    },
+    {
+      "state": "OFF",
+      "text": "Relay turns OFF"
+    },
+    {
+      "state": "OFF",
+      "text": "Relay turns OFF"
+    },
+    {
+      "state": "OFF",
+      "text": "relay turns OFF"
+    },
+    {
+      "state": "OFF",
+      "text": "relay turns OFF"
+    }
+  ],
+  "raw_extractions": {
+    "voltages": [
+      {
+        "type": "range",
+        "min": 8.0,
+        "max": 14.0,
+        "unit": "VAC",
+        "text": "8 to 14 V"
+      },
+      {
+        "type": "range",
+        "min": 347.0,
+        "max": 357.0,
+        "unit": "VAC",
+        "text": "347 to 357 VAC"
+      },
+      {
+        "type": "range",
+        "min": 318.0,
+        "max": 328.0,
+        "unit": "VAC",
+        "text": "318 to 328 VAC"
+      },
+      {
+        "type": "range",
+        "min": 342.0,
+        "max": 348.0,
+        "unit": "VAC",
+        "text": "342 to 348 VAC"
+      },
+      {
+        "type": "range",
+        "min": 453.0,
+        "max": 459.0,
+        "unit": "VAC",
+        "text": "453 to 459 VAC"
+      },
+      {
+        "type": "range",
+        "min": 415.0,
+        "max": 421.0,
+        "unit": "VAC",
+        "text": "415 to 421 VAC"
+      },
+      {
+        "type": "range",
+        "min": 472.0,
+        "max": 478.0,
+        "unit": "VAC",
+        "text": "472 to 478 VAC"
+      },
+      {
+        "type": "range",
+        "min": 90.0,
+        "max": 98.0,
+        "unit": "VAC",
+        "text": "90 to 98 VAC"
+      },
+      {
+        "type": "range",
+        "min": 90.0,
+        "max": 98.0,
+        "unit": "VAC",
+        "text": "90 to 98 VAC"
+      },
+      {
+        "type": "range",
+        "min": 8.0,
+        "max": 14.0,
+        "unit": "VAC",
+        "text": "8 to 14 V"
+      },
+      {
+        "type": "simple",
+        "value": 240.0,
+        "unit": "VAC",
+        "text": "240 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 415.0,
+        "unit": "VAC",
+        "text": "415 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 0.0,
+        "unit": "VAC",
+        "text": "0V"
+      },
+      {
+        "type": "simple",
+        "value": 240.0,
+        "unit": "VAC",
+        "text": "240 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 240.0,
+        "unit": "VAC",
+        "text": "240 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 240.0,
+        "unit": "VAC",
+        "text": "240 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 240.0,
+        "unit": "VAC",
+        "text": "240 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 0.0,
+        "unit": "VAC",
+        "text": "0V"
+      },
+      {
+        "type": "simple",
+        "value": 35.0,
+        "unit": "VAC",
+        "text": "35V"
+      },
+      {
+        "type": "simple",
+        "value": 0.0,
+        "unit": "VAC",
+        "text": "0V"
+      },
+      {
+        "type": "simple",
+        "value": 415.0,
+        "unit": "VAC",
+        "text": "415 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 380.0,
+        "unit": "VAC",
+        "text": "380 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 415.0,
+        "unit": "VAC",
+        "text": "415 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 415.0,
+        "unit": "VAC",
+        "text": "415 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 415.0,
+        "unit": "VAC",
+        "text": "415 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 415.0,
+        "unit": "VAC",
+        "text": "415 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 345.0,
+        "unit": "VAC",
+        "text": "345VAC"
+      },
+      {
+        "type": "simple",
+        "value": 475.0,
+        "unit": "VAC",
+        "text": "475VAC"
+      },
+      {
+        "type": "simple",
+        "value": 4.0,
+        "unit": "VAC",
+        "text": "4V"
+      },
+      {
+        "type": "simple",
+        "value": 2.0,
+        "unit": "VAC",
+        "text": "2V"
+      },
+      {
+        "type": "simple",
+        "value": 7.0,
+        "unit": "VAC",
+        "text": "7V"
+      },
+      {
+        "type": "simple",
+        "value": 2.0,
+        "unit": "VAC",
+        "text": "2V"
+      },
+      {
+        "type": "simple",
+        "value": 94.0,
+        "unit": "VAC",
+        "text": "94 VAC"
+      },
+      {
+        "type": "simple",
+        "value": 35.0,
+        "unit": "VAC",
+        "text": "35V"
+      },
+      {
+        "type": "simple",
+        "value": 10.0,
+        "unit": "VAC",
+        "text": "10V"
+      }
+    ],
+    "percentages": [
+      {
+        "type": "simple",
+        "value": 85.0,
+        "text": "85.00%"
+      },
+      {
+        "type": "simple",
+        "value": 110.0,
+        "text": "110.00%"
+      }
+    ],
+    "delays": [
+      {
+        "type": "range",
+        "min": 4.0,
+        "max": 6.0,
+        "unit": "seconds",
+        "text": "4 to 6s"
+      },
+      {
+        "type": "range",
+        "min": 2.8,
+        "max": 3.2,
+        "unit": "seconds",
+        "text": "2.8 to 3.2s"
+      },
+      {
+        "type": "range",
+        "min": 4.0,
+        "max": 6.0,
+        "unit": "seconds",
+        "text": "4 to 6s"
+      },
+      {
+        "type": "simple",
+        "value": 0.5,
+        "unit": "seconds",
+        "original_unit": "milliseconds",
+        "text": "500 ms"
+      },
+      {
+        "type": "simple",
+        "value": 0.5,
+        "unit": "seconds",
+        "original_unit": "milliseconds",
+        "text": "500ms"
+      },
+      {
+        "type": "simple",
+        "value": 0.05,
+        "unit": "seconds",
+        "original_unit": "milliseconds",
+        "text": "50ms"
+      },
+      {
+        "type": "simple",
+        "value": 0.1,
+        "unit": "seconds",
+        "original_unit": "milliseconds",
+        "text": "100ms"
+      },
+      {
+        "type": "simple",
+        "value": 0.05,
+        "unit": "seconds",
+        "original_unit": "milliseconds",
+        "text": "50ms"
+      },
+      {
+        "type": "simple",
+        "value": 0.5,
+        "unit": "seconds",
+        "original_unit": "milliseconds",
+        "text": "500ms"
+      },
+      {
+        "type": "simple",
+        "value": 5.0,
+        "unit": "seconds",
+        "text": "5s"
+      },
+      {
+        "type": "simple",
+        "value": 3.0,
+        "unit": "seconds",
+        "text": "3s"
+      },
+      {
+        "type": "simple",
+        "value": 10.0,
+        "unit": "seconds",
+        "text": "10 sec"
+      },
+      {
+        "type": "simple",
+        "value": 5.0,
+        "unit": "seconds",
+        "text": "5s"
+      }
+    ],
+    "led_states": [
+      {
+        "led": "IS",
+        "state": "ON",
+        "text": "is turn ON"
+      },
+      {
+        "led": "SLIDE",
+        "state": "ON",
+        "text": "SLIDE Turn ON"
+      },
+      {
+        "led": "INDICATION",
+        "state": "ON",
+        "text": "indication turns ON"
+      },
+      {
+        "led": "WILL",
+        "state": "ON",
+        "text": "will turns ON"
+      },
+      {
+        "led": "ALSO",
+        "state": "ON",
+        "text": "also turns on"
+      },
+      {
+        "led": "JIG",
+        "state": "ON",
+        "text": "jig turns ON"
+      },
+      {
+        "led": "JIG",
+        "state": "ON",
+        "text": "jig turns ON"
+      },
+      {
+        "led": "STARTS",
+        "state": "BLINKING",
+        "text": "starts blink"
+      },
+      {
+        "led": "STARTS",
+        "state": "BLINKING",
+        "text": "starts flash"
+      },
+      {
+        "led": "ON",
+        "state": "BLINKING",
+        "text": "ON Blink"
+      },
+      {
+        "led": "ON",
+        "state": "BLINKING",
+        "text": "ON Blink"
+      },
+      {
+        "led": "PHASE",
+        "state": "BLINKING",
+        "text": "Phase\nBlink"
+      },
+      {
+        "led": "ING",
+        "state": "BLINKING",
+        "text": "ing Blink"
+      },
+      {
+        "led": "APPLICABLE",
+        "state": "BLINKING",
+        "text": "Applicable Blink"
+      },
+      {
+        "led": "ALL",
+        "state": "BLINKING",
+        "text": "All LED Blink"
+      },
+      {
+        "led": "NF",
+        "state": "BLINKING",
+        "text": "NF Led Blink"
+      },
+      {
+        "led": "ALL",
+        "state": "BLINKING",
+        "text": "ALL LED BLINK"
+      }
+    ],
+    "relay_states": [
+      {
+        "state": "ON",
+        "text": "relay turns ON"
+      },
+      {
+        "state": "ON",
+        "text": "Relay turns ON"
+      },
+      {
+        "state": "ON",
+        "text": "Relay turns ON"
+      },
+      {
+        "state": "ON",
+        "text": "Relay turns ON"
+      },
+      {
+        "state": "ON",
+        "text": "relay turns ON"
+      },
+      {
+        "state": "ON",
+        "text": "relay turns ON"
+      },
+      {
+        "state": "OFF",
+        "text": "Relay turns OFF"
+      },
+      {
+        "state": "OFF",
+        "text": "Relay turns OFF"
+      },
+      {
+        "state": "OFF",
+        "text": "Relay turns OFF"
+      },
+      {
+        "state": "OFF",
+        "text": "relay turns OFF"
+      },
+      {
+        "state": "OFF",
+        "text": "relay turns OFF"
+      }
+    ]
+  }
+}

@@ -133,56 +133,67 @@ async def extract_pdf(file: UploadFile = File(...)):
         num_machines = 0
         summary = f"Segmentation failed: {str(e)}"
 
-    # STEP 5.5: Extract tables and parse specifications (NEW!)
+    # STEP 5.5: Extract tables, specs, AND generate test conditions
     processed_blocks = []
     try:
         from services.table_extractor import extract_tables
         from services.spec_parser import parse_specifications
+        from services.condition_generator import generate_test_conditions
         
         for block in blocks:
-            # Extract tables from this block
+            # 1. Extract tables from this block
             tables = extract_tables(block["text"])
             
-            # Parse specifications
+            # 2. Parse voltage specifications (Sheet 1: Specifications)
             specs = parse_specifications(block["text"], tables)
             
-            # Add to block data
+            # 3. Generate test conditions from specs (Sheet 2: Test_Procedures)
+            test_conditions = generate_test_conditions(specs)
+            
+            # Add all data to block
             block["tables"] = tables
             block["specifications"] = specs
             block["num_tables"] = len(tables)
+            block["test_conditions"] = test_conditions
+            block["num_test_conditions"] = len(test_conditions)
             
             processed_blocks.append(block)
             
-            logger.info(f"{block['machine']}: Found {len(tables)} tables, "
+            logger.info(f"{block['machine']}: {len(tables)} tables, "
                        f"{len(specs['voltage_parameters'])} voltage params, "
-                       f"{len(specs['timing_parameters'])} timing params")
+                       f"{len(specs['timing_parameters'])} timing params, "
+                       f"{len(test_conditions)} test conditions")
         
     except Exception as e:
-        logger.error(f"Table/spec extraction failed: {e}")
-        # Use blocks without table data if extraction fails
+        logger.error(f"Extraction failed: {e}")
+        import traceback
+        traceback.print_exc()
+        # Use blocks without extracted data if it fails
         processed_blocks = blocks
     
     # STEP 6: Text files DISABLED (not needed - only Excel outputs)
     text_files = []
 
-# STEP 6.5: Generate Excel files (NEW!)
+    # STEP 6.5: Generate Excel files with specs AND test conditions
     excel_files = []
     try:
         from services.excel_writer import generate_excel
         
         for block in processed_blocks:
-            if block.get("specifications"):
-                filename = generate_excel(
-                    extraction_id,
-                    block["machine"],
-                    block["specifications"],
-                    OUTPUT_DIR
-                )
-                excel_files.append(filename)
-                logger.info(f"Generated Excel: {filename}")
+            filename = generate_excel(
+                extraction_id,
+                block["machine"],
+                block.get("specifications", {}),
+                OUTPUT_DIR,
+                test_conditions=block.get("test_conditions", [])
+            )
+            excel_files.append(filename)
+            logger.info(f"Generated Excel: {filename}")
         
     except Exception as e:
         logger.error(f"Excel generation failed: {e}")
+        import traceback
+        traceback.print_exc()
         # Don't fail the whole request if Excel generation fails
     
 # STEP 7: Save extraction metadata (UPDATED!)
@@ -193,12 +204,13 @@ async def extract_pdf(file: UploadFile = File(...)):
         "num_pages": num_pages,
         "num_machines": num_machines,
         "machines": [block["machine"] for block in processed_blocks],
-        "machine_details": [  # NEW!
+        "machine_details": [
             {
                 "machine": block["machine"],
                 "num_tables": block.get("num_tables", 0),
                 "num_voltage_params": len(block.get("specifications", {}).get("voltage_parameters", {})),
                 "num_timing_params": len(block.get("specifications", {}).get("timing_parameters", {})),
+                "num_test_conditions": block.get("num_test_conditions", 0),
             }
             for block in processed_blocks
         ],
