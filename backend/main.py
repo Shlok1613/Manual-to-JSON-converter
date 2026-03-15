@@ -133,12 +133,12 @@ async def extract_pdf(file: UploadFile = File(...)):
         num_machines = 0
         summary = f"Segmentation failed: {str(e)}"
 
-    # STEP 5.5: Extract tables, specs, AND generate test conditions
+    # STEP 5.5: Extract tables, specs, AND generate comprehensive test conditions
     processed_blocks = []
     try:
         from services.table_extractor import extract_tables
         from services.spec_parser import parse_specifications
-        from services.condition_generator import generate_test_conditions
+        from services.condition_generator import generate_comprehensive_conditions
         
         for block in blocks:
             # 1. Extract tables from this block
@@ -147,8 +147,8 @@ async def extract_pdf(file: UploadFile = File(...)):
             # 2. Parse voltage specifications (Sheet 1: Specifications)
             specs = parse_specifications(block["text"], tables)
             
-            # 3. Generate test conditions from specs (Sheet 2: Test_Procedures)
-            test_conditions = generate_test_conditions(specs)
+            # 3. Generate COMPREHENSIVE test conditions (voltage + procedures)
+            test_conditions = generate_comprehensive_conditions(specs, block["text"])
             
             # Add all data to block
             block["tables"] = tables
@@ -162,7 +162,7 @@ async def extract_pdf(file: UploadFile = File(...)):
             logger.info(f"{block['machine']}: {len(tables)} tables, "
                        f"{len(specs['voltage_parameters'])} voltage params, "
                        f"{len(specs['timing_parameters'])} timing params, "
-                       f"{len(test_conditions)} test conditions")
+                       f"{len(test_conditions)} comprehensive conditions")
         
     except Exception as e:
         logger.error(f"Extraction failed: {e}")

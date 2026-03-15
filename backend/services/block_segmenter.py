@@ -2,8 +2,9 @@
 Block Segmentation Service - SMART TABLE-AWARE VERSION
 Splits extracted PDF text into separate machine/product blocks.
 
-KEY IMPROVEMENT:
+KEY IMPROVEMENTS:
 - Won't split a block if it references tables that haven't appeared yet
+- Uses UniversalPatternLibrary for machine name detection (MAG, MAC, MG, SM, etc.)
 - This prevents cutting off blocks before their TABLE sections appear
 - Works generically for ANY machine with similar layout
 """
@@ -26,27 +27,69 @@ SECTION_PATTERNS = [
     r"^Functional\s+Testing\s+table\s+for\s+(\w+)",      # "Functional Testing table for Daikin"
     r"^For\s+(MG\d+[A-Z]+)\s+product",                   # "For MG73BQ product" - section boundary for MG variants
     r"^(DMS\d+)",                                         # "DMS110", "DMS120", etc.
-    r"^(MG\d+[A-Z]+)(?:\s+product|:|\s+Functional|\s+CRITICALITY|\s+\(.+Testing)",  # MG + context (NOT bare "MG73BQ" table rows!)
+    r"^(MG\d+[A-Z]+)(?:\s+product|:|\s+Functional|\s+CRITICALITY|\s+\(.+Testing)",  # MG + context
     r"^PROCEDURE\s+FOR\s+(.+?):",                        # "PROCEDURE FOR DMS110:"
+    # Additional patterns for broader coverage
+    r"FUNCTIONAL\s+TEST\s+PROCEDURE\s+FOR\s+([A-Z0-9][A-Z0-9_]{2,})",  # "FUNCTIONAL TEST PROCEDURE FOR SPPR"
+    r"^([A-Z0-9][A-Z0-9_]{2,})\s+(?:AUTOMATED\s+)?FUNCTIONAL\s+TESTING",  # "SM500 FUNCTIONAL TESTING"
+    r"([A-Z]{2,})PROCESS\s*:\s*Functional",              # "SPPRPROCESS: Functional"
+    r"PROCESS\s*:\s*Functional\s+Testing\s+([A-Z0-9][A-Z0-9_]{2,})",  # "PROCESS: Functional Testing SM500_A"
 ]
 
 # Patterns that ALWAYS force a split, even if block is < MIN_BLOCK_SIZE
-# These clearly indicate a new machine/procedure is starting
 FORCE_SPLIT_PATTERNS = [
     r"^PROCESS:\s*(.+)",                                 # "PROCESS:" - top-level section
     r"^PROCEDURE\s+FOR\s+(.+?):",                        # "PROCEDURE FOR" - explicit procedure start
     r"^For\s+(MG\d+[A-Z]+)\s+product",                   # "For MG73BQ product" - always marks new product
 ]
 
-# Regex to find machine names in text
-MACHINE_NAME_PATTERN = re.compile(
-    r'\b(SPPR|SM\d+_[A-Z]|SM\d+|DSMR|DMS\d+|DMA\d+|MAG\w+|MAC\w+|MG\d+\w+|MD\d+\w+|MB\d+\w+)\b',
-    re.IGNORECASE
-)
+# Valid machine name prefixes (filters false positives)
+VALID_PREFIXES = {'SPPR', 'SM', 'MG', 'DMS', 'DMA', 'DSMR', 'MAC', 'MAG', 'MB'}
+
+def is_valid_machine_name(name: str) -> bool:
+    """Check if name matches a valid machine name pattern."""
+    name = name.upper()
+    return 3 <= len(name) <= 15 and any(name.startswith(p) for p in VALID_PREFIXES)
+
+def has_table_spec(block_text: str) -> bool:
+    """Check if a block contains actual test specification tables."""
+    return bool(re.search(
+        r'TABLE\s*\d?\s*\(PRODUCT\s*SETTINGS'
+        r'|Under\s*Voltage\s*\(UV\).*?\d+\s+to\s+\d+\s+VAC',
+        block_text, re.I | re.DOTALL
+    ))
+
+# Use pattern library for machine detection
+try:
+    from services.pattern_library import UniversalPatternLibrary as Patterns
+    MACHINE_NAME_PATTERN = Patterns.MACHINE_NAME_REGEX
+except ImportError:
+    MACHINE_NAME_PATTERN = re.compile(
+        r'\b(SPPR|SM\d+_[A-Z]|SM\d+|DSMR|DMS\d+|DMA\d+|MAG\w+|MAC\w+|MG\d+\w+|MD\d+\w+|MB\d+\w+)\b',
+        re.IGNORECASE
+    )
+
+# SCOPE pattern for WI-format PDFs (e.g., "SCOPE : MAG03D0424 / MAG03D0425")
+SCOPE_PATTERN = re.compile(r'SCOPE\s*:\s*([\w/\s]+)', re.IGNORECASE)
 
 
 def find_machine_name(text: str, fallback: str = "UNKNOWN") -> str:
-    """Extract machine/product name from text."""
+    """Extract machine/product name from text.
+    
+    Checks:
+    1. SCOPE line (WI-format) - extracts first MAG/MAC name from SCOPE
+    2. Direct machine name match in text
+    """
+    # Check SCOPE line first (WI-format PDFs)
+    scope_match = SCOPE_PATTERN.search(text)
+    if scope_match:
+        scope_text = scope_match.group(1)
+        # Find first MAG/MAC name in scope
+        machine_match = MACHINE_NAME_PATTERN.search(scope_text)
+        if machine_match:
+            return machine_match.group(1).upper()
+    
+    # Standard machine name detection
     match = MACHINE_NAME_PATTERN.search(text)
     if match:
         return match.group(1).upper()
@@ -201,15 +244,73 @@ def segment_blocks(full_text: str) -> List[Dict[str, str]]:
         blocks.append(current_block)
         logger.info(f"Completed final block: {current_block['machine']} ({len(current_block['text'])} chars)")
     
-    # Clean up machine names (remove duplicates, number them)
+    # POST-PROCESSING Step 0: Merge short blocks with next block
+    # Some machines (e.g. DSMR) have a 1-line header block followed by content
+    MIN_MERGE_LENGTH = 1500
+    merged = []
+    i = 0
+    while i < len(blocks):
+        block = blocks[i]
+        if (len(block["text"]) < MIN_MERGE_LENGTH and 
+            not has_table_spec(block["text"]) and 
+            i + 1 < len(blocks)):
+            # Merge header-only block with next block's content
+            next_block = blocks[i + 1]
+            merged.append({
+                "machine": block["machine"],
+                "header": block.get("header", ""),
+                "text": block["text"] + next_block["text"]
+            })
+            logger.info(f"Merged short block {block['machine']} ({len(block['text'])} chars) with next block")
+            i += 2
+        else:
+            merged.append(block)
+            i += 1
+    blocks = merged
+    
+    # POST-PROCESSING Step 1: Rename MACHINE_X blocks using full block text
+    for block in blocks:
+        if block["machine"].startswith("MACHINE_"):
+            real_name = find_machine_name(block["text"], fallback=block["machine"])
+            if real_name != block["machine"]:
+                logger.info(f"Renamed {block['machine']} → {real_name} (from block text)")
+                block["machine"] = real_name
+    
+    # POST-PROCESSING Step 2: Handle SCOPE-based documents (WI.pdf format)
+    # If most blocks resolve to the same machine, check for SCOPE line
+    from collections import Counter
+    name_counts = Counter(b["machine"] for b in blocks)
+    most_common_name, most_common_count = name_counts.most_common(1)[0]
+    # Trigger if ≥70% of blocks share the same name (handles stray MACHINE_X blocks)
+    if len(blocks) > 3 and most_common_count / len(blocks) >= 0.7:
+        # All blocks have same name — likely a SCOPE-based consolidated document
+        combined_text = "\n".join(b["text"] for b in blocks)
+        scope_match = SCOPE_PATTERN.search(combined_text)
+        
+        if scope_match:
+            scope_text = scope_match.group(1)
+            # Extract individual product names from SCOPE (e.g., "MAG03D0424 / MAG03D0425 / ...")
+            scope_products = re.findall(
+                r'(MAG\d+[A-Z0-9]+|MAC\d+[A-Z0-9]+|SM\d+_[A-Z]|SM\d+|MG\d+[A-Z]+)',
+                scope_text, re.IGNORECASE
+            )
+            scope_products = list(dict.fromkeys(p.upper() for p in scope_products))  # Unique, ordered
+            
+            if len(scope_products) > 1:
+                logger.info(f"SCOPE-based document detected with {len(scope_products)} products: {scope_products}")
+                # Create one block per SCOPE product, all sharing the combined text
+                blocks = [
+                    {"machine": prod, "header": f"SCOPE: {prod}", "text": combined_text}
+                    for prod in scope_products
+                ]
+                logger.info(f"Created {len(blocks)} product blocks from SCOPE")
+                return blocks
+    
+    # POST-PROCESSING Step 3: Clean up duplicate names (non-SCOPE documents)
     machine_counts = {}
     for block in blocks:
         machine = block["machine"]
-        
-        # Count occurrences
         machine_counts[machine] = machine_counts.get(machine, 0) + 1
-        
-        # If duplicate, add number
         if machine_counts[machine] > 1:
             block["machine"] = f"{machine}_{machine_counts[machine]}"
     

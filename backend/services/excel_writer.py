@@ -231,13 +231,13 @@ def create_specifications_sheet(ws, machine: str, specs: Dict):
 
 def create_test_procedures_sheet(ws, machine: str, test_conditions: List[Dict]):
     """
-    Create the Test_Procedures sheet using GENERATED test conditions.
-    
-    Matches the template format exactly:
-    - Each condition spans multiple rows (1 row per POT/voltage/LED line)
-    - First row of condition has: F=test case, G=POT, H=voltage, J=LED, K=relay, L=on_delay, M=off_delay
-    - Subsequent rows of same condition have: G=POT, H=voltage, J=LED (continuation)
-    - Empty row between conditions
+    Create the Test_Procedures sheet with MULTI-ROW LED FORMAT.
+    Each condition spans exactly 5 rows:
+      Row 1: test_case | P1 | RN | PWR LED | relay | on_delay | off_delay
+      Row 2:           | P2 | YN | UV LED  |       |          |
+      Row 3:           | P3 | BN | OV LED  |       |          |
+      Row 4:           |    |    | ASY LED |       |          |
+      Row 5: (blank spacer)
     """
     current_row = 1
     
@@ -246,12 +246,12 @@ def create_test_procedures_sheet(ws, machine: str, test_conditions: List[Dict]):
     ws.cell(row=current_row, column=1).font = Font(bold=True, size=14)
     current_row += 1
     
-    # Row 2: Headers in columns F-M (matching template exactly)
+    # Row 2: Headers in columns F-M
     template_headers = {
         6: "Test cases/ parameters",  # F
         7: "POT Setting",             # G
         8: "Voltage Setting",         # H
-        9: "",                         # I (empty)
+        9: "",                         # I
         10: "LED STATUS",             # J
         11: "relay status",           # K
         12: "On delay",               # L
@@ -265,7 +265,7 @@ def create_test_procedures_sheet(ws, machine: str, test_conditions: List[Dict]):
         cell.border = BORDER_THIN
     current_row += 1
     
-    # Rows 3-7: DIP S/W settings placeholder
+    # Rows 3-7: DIP S/W settings
     ws.cell(row=current_row, column=6, value="DIP S/W setting")
     ws.cell(row=current_row, column=6).font = SUBHEADER_FONT
     ws.cell(row=current_row, column=6).fill = SUBHEADER_FILL
@@ -293,56 +293,13 @@ def create_test_procedures_sheet(ws, machine: str, test_conditions: List[Dict]):
     ws.cell(row=current_row, column=9).border = BORDER_THIN
     current_row += 1
     
-    # Row 10+: Test condition data
+    # === TEST CONDITIONS (Starting Row 10) ===
     if not test_conditions:
         ws.cell(row=current_row, column=6, value="No test conditions generated")
         ws.cell(row=current_row, column=6).font = Font(italic=True, color="999999")
     else:
         for cond in test_conditions:
-            test_case = cond.get("test_case", "-")
-            pot_settings = cond.get("pot_settings", ["-"])
-            voltages = cond.get("voltages", ["-"])
-            led_rows = cond.get("led_rows", ["-"])
-            relay_status = cond.get("relay_status", "-")
-            on_delay = cond.get("on_delay", "-")
-            off_delay = cond.get("off_delay", "-")
-            
-            # Determine max sub-rows needed
-            max_rows = max(len(pot_settings), len(voltages), len(led_rows))
-            
-            # Write each sub-row of this condition
-            for i in range(max_rows):
-                row_data = [None, None, None, None, None]  # Cols A-E empty
-                
-                # F: Test case name (only on first row)
-                row_data.append(test_case if i == 0 else None)
-                
-                # G: POT Setting
-                row_data.append(pot_settings[i] if i < len(pot_settings) else None)
-                
-                # H: Voltage Setting
-                row_data.append(voltages[i] if i < len(voltages) else None)
-                
-                # I: empty
-                row_data.append(None)
-                
-                # J: LED STATUS
-                row_data.append(led_rows[i] if i < len(led_rows) else None)
-                
-                # K: Relay status (only on first row)
-                row_data.append(relay_status if i == 0 else None)
-                
-                # L: On delay (only on first row)
-                row_data.append(on_delay if i == 0 else None)
-                
-                # M: Off delay (only on first row)
-                row_data.append(off_delay if i == 0 else None)
-                
-                write_data_row(ws, current_row, row_data)
-                current_row += 1
-            
-            # Empty row between conditions
-            current_row += 1
+            current_row = _write_condition_5row(ws, cond, current_row)
     
     # Set column widths
     set_column_widths(ws, {
@@ -356,7 +313,178 @@ def create_test_procedures_sheet(ws, machine: str, test_conditions: List[Dict]):
         "M": 18,
     })
     
-    logger.info(f"Created test procedures sheet for {machine} ({len(test_conditions)} conditions)")
+    logger.info(f"Created test procedures sheet for {machine} "
+                f"({len(test_conditions)} conditions, {current_row - 1} rows)")
+
+
+def _write_condition_5row(ws, cond: Dict, start_row: int) -> int:
+    """
+    Write one test condition across exactly 5 rows.
+    Supports BOTH key formats:
+      New (universal_spec_extractor): tc, v1, v2, v3, l1, l2, l3, l4, relay, on_d, off_d
+      Old (legacy): test_case, pot_setting, voltage, led_status, led_extra, relay_status, on_delay, off_delay
+    Returns next available row (start_row + 5).
+    """
+    # Detect format and extract values
+    if 'tc' in cond:
+        # NEW format — values already pre-split
+        tc    = cond.get('tc', '')
+        v1    = cond.get('v1', '')
+        v2    = cond.get('v2', '')
+        v3    = cond.get('v3', '')
+        l1    = cond.get('l1', 'PWR (GREEN LED) : ON')
+        l2    = cond.get('l2', 'UV (RED LED) : OFF')
+        l3    = cond.get('l3', 'OV (RED LED) : OFF')
+        l4    = cond.get('l4', 'ASY (RED LED) : OFF')
+        relay = cond.get('relay', '-')
+        on_d  = cond.get('on_d', '-')
+        off_d = cond.get('off_d', '-')
+        # No POT in new format — leave column G empty
+        p1, p2, p3 = '', '', ''
+    else:
+        # OLD format — need to parse combined strings
+        tc = cond.get('test_case', '')
+        p1, p2, p3 = _parse_pot_settings(cond.get('pot_setting', '-'))
+        v1, v2, v3 = _parse_voltages(cond.get('voltage', '-'))
+        l1, l2, l3, l4 = _parse_led_statuses(
+            cond.get('led_status', ''),
+            cond.get('led_extra', [])
+        )
+        relay = cond.get('relay_status', '-')
+        on_d  = cond.get('on_delay', '-')
+        off_d = cond.get('off_delay', '-')
+    
+    r = start_row
+    
+    # ROW 1: Main condition row
+    ws.cell(row=r, column=6, value=tc).border = BORDER_THIN
+    ws.cell(row=r, column=7, value=p1).border = BORDER_THIN
+    ws.cell(row=r, column=8, value=v1).border = BORDER_THIN
+    ws.cell(row=r, column=10, value=l1).border = BORDER_THIN
+    ws.cell(row=r, column=11, value=relay).border = BORDER_THIN
+    ws.cell(row=r, column=12, value=on_d).border = BORDER_THIN
+    ws.cell(row=r, column=13, value=off_d).border = BORDER_THIN
+    ws.cell(row=r, column=6).font = Font(bold=True)
+    
+    # ROW 2: P2 + YN + UV LED
+    ws.cell(row=r+1, column=7, value=p2).border = BORDER_THIN
+    ws.cell(row=r+1, column=8, value=v2).border = BORDER_THIN
+    ws.cell(row=r+1, column=10, value=l2).border = BORDER_THIN
+    for col in [6, 9, 11, 12, 13]:
+        ws.cell(row=r+1, column=col).border = BORDER_THIN
+    
+    # ROW 3: P3 + BN + OV LED
+    ws.cell(row=r+2, column=7, value=p3).border = BORDER_THIN
+    ws.cell(row=r+2, column=8, value=v3).border = BORDER_THIN
+    ws.cell(row=r+2, column=10, value=l3).border = BORDER_THIN
+    for col in [6, 9, 11, 12, 13]:
+        ws.cell(row=r+2, column=col).border = BORDER_THIN
+    
+    # ROW 4: ASY LED only
+    ws.cell(row=r+3, column=10, value=l4).border = BORDER_THIN
+    for col in [6, 7, 8, 9, 11, 12, 13]:
+        ws.cell(row=r+3, column=col).border = BORDER_THIN
+    
+    # ROW 5: Empty spacer (borders only)
+    for col in range(6, 14):
+        ws.cell(row=r+4, column=col).border = BORDER_THIN
+    
+    return r + 5  # Next condition starts 5 rows later
+
+
+def _parse_pot_settings(pot_string: str) -> tuple:
+    """Parse 'P1 = 7 %, P2 = 0 SEC, P3 = 15 SEC' → (P1, P2, P3) per-row."""
+    if pot_string == "-" or not pot_string:
+        return "-", "-", "-"
+    
+    p1_match = re.search(r'P1\s*=\s*([^,]+)', pot_string)
+    p2_match = re.search(r'P2\s*=\s*([^,]+)', pot_string)
+    p3_match = re.search(r'P3\s*=\s*([^,]+)', pot_string)
+    
+    p1 = f"P1 = {p1_match.group(1).strip()}" if p1_match else pot_string
+    p2 = f"P2 = {p2_match.group(1).strip()}" if p2_match else "-"
+    p3 = f"P3 = {p3_match.group(1).strip()}" if p3_match else "-"
+    
+    return p1, p2, p3
+
+
+def _parse_voltages(voltage_string: str) -> tuple:
+    """Parse 'RN :0, YN :0, BN :0' → (RN, YN, BN) per-row."""
+    if not voltage_string or voltage_string == "-":
+        return "-", "-", "-"
+    
+    if ',' in voltage_string:
+        parts = [v.strip() for v in voltage_string.split(',')]
+        rn = parts[0] if len(parts) > 0 else "-"
+        yn = parts[1] if len(parts) > 1 else "-"
+        bn = parts[2] if len(parts) > 2 else "-"
+    else:
+        # Single voltage (e.g., "RN : 347") — put it in RN, YN/BN get 240
+        rn = voltage_string
+        yn = "YN : 240"
+        bn = "BN : 240"
+    
+    return rn, yn, bn
+
+
+def _parse_led_statuses(led_string: str, led_extra: List[str] = None) -> tuple:
+    """
+    Parse LED status into exactly 4 values: (PWR, UV, OV, ASY).
+    Uses led_extra list to fill in missing values.
+    """
+    pwr = "PWR (GREEN LED) : ON"
+    uv = "UV (RED LED) : OFF"
+    ov = "OV (RED LED) : OFF"
+    asy = "ASY (RED LED) : OFF"
+    
+    # Try parsing from combined led_status string
+    if led_string:
+        pwr_match = re.search(r'PWR[^,]*?:\s*([^,]+)', led_string, re.IGNORECASE)
+        if pwr_match:
+            pwr = f"PWR (GREEN LED) : {pwr_match.group(1).strip()}"
+        
+        uv_match = re.search(r'UV[^,]*?:\s*([^,]+)', led_string, re.IGNORECASE)
+        if uv_match:
+            uv = f"UV (RED LED) : {uv_match.group(1).strip()}"
+        
+        ov_match = re.search(r'OV[^,]*?:\s*([^,]+)', led_string, re.IGNORECASE)
+        if ov_match:
+            ov = f"OV (RED LED) : {ov_match.group(1).strip()}"
+        
+        asy_match = re.search(r'(?:ASY|ASYM)[^,]*?:\s*([^,]+)', led_string, re.IGNORECASE)
+        if asy_match:
+            asy = f"ASY (RED LED) : {asy_match.group(1).strip()}"
+        
+        # Handle special cases
+        if 'All LEDs : OFF' in led_string:
+            pwr = "PWR (GREEN LED) : OFF"
+            uv = "UV (RED LED) : OFF"
+            ov = "OV (RED LED) : OFF"
+            asy = "ASY (RED LED) : OFF"
+        
+        if 'Blinking' in led_string:
+            pwr = led_string  # Keep full status like "PWR (GREEN LED) : Blinking"
+    
+    # Override from led_extra if present
+    if led_extra:
+        for extra in led_extra:
+            extra_upper = extra.upper()
+            if 'UV' in extra_upper:
+                uv = extra
+            elif 'OV' in extra_upper:
+                ov = extra
+            elif 'ASY' in extra_upper or 'ASYM' in extra_upper:
+                asy = extra
+            elif 'PWR' in extra_upper:
+                pwr = extra
+            elif 'ALL FAULT' in extra_upper or 'ALL LED' in extra_upper:
+                uv = extra
+                ov = "-"
+                asy = "-"
+            elif 'FAULT' in extra_upper or 'NF' in extra_upper or 'PHASE' in extra_upper:
+                uv = extra
+    
+    return pwr, uv, ov, asy
 
 
 def generate_excel(

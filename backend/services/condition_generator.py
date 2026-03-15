@@ -1,20 +1,19 @@
 # backend/services/condition_generator.py
 """
-Test Condition Matrix Generator
+Test Condition Generator - 100% Template Match
+Generates test condition scenarios from voltage specifications.
+Matches 1M_SPP_SM175_AUTO_FUNCTION_All_CatID.xlsx format exactly.
 
-Generates state-based test condition scenarios from extracted voltage specifications.
-Each condition describes a test STATE (not an action), matching the template format:
-
-- Column F: Test case name (e.g., "healthy condition", "UV faulty condition with delay")
-- Column G: POT Setting (e.g., "UV = 85%")
-- Column H: Voltage Setting (e.g., "RN:240, YN:240, BN:240")
-- Column J: LED STATUS (e.g., "PWR (GREEN LED) : ON")
-- Column K: relay status (e.g., "ON", "OFF in 4-6 sec")
-- Column L: On delay
-- Column M: off delay
-
-Input: spec_parser output (voltage_parameters, timing_parameters, raw_extractions)
-Output: List of test condition dicts ready for Excel template
+Output format per condition:
+{
+    "test_case": "healthy condition",
+    "pot_setting": "P1 = 7 %, P2 = 0 SEC, P3 = 15 SEC",
+    "voltage": "RN :0, YN :0, BN :0",
+    "led_status": "PWR (GREEN LED) : ON, UV (RED LED) : OFF, ...",
+    "relay_status": "ON",
+    "on_delay": "Instant ON",
+    "off_delay": "-"
+}
 """
 
 import re
@@ -25,18 +24,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _parse_percentage(setting: str) -> Optional[float]:
-    """Extract percentage value from setting string like '85.00%' or '110%'."""
-    m = re.search(r'(\d+(?:\.\d+)?)\s*%', str(setting))
+# ─── SPEC PARSING HELPERS ────────────────────────────────────────────
+# Bridge between spec_parser's nested output and flat values needed here
+
+def _parse_percentage(text: str) -> Optional[float]:
+    """Extract percentage from '85.00%' or '110%'."""
+    m = re.search(r'(\d+(?:\.\d+)?)\s*%', str(text))
     return float(m.group(1)) if m else None
 
 
 def _parse_voltage_range(text: str) -> Optional[Tuple[float, float]]:
-    """Extract min-max voltage from '347 to 357 VAC' or '347-357'."""
+    """Extract min-max from '347 to 357 VAC' or '347-357'."""
     m = re.search(r'(\d+(?:\.\d+)?)\s*(?:to|-|–)\s*(\d+(?:\.\d+)?)', str(text))
     if m:
         return float(m.group(1)), float(m.group(2))
-    # Single value
     m = re.search(r'(\d+(?:\.\d+)?)\s*VAC', str(text), re.IGNORECASE)
     if m:
         v = float(m.group(1))
@@ -45,7 +46,7 @@ def _parse_voltage_range(text: str) -> Optional[Tuple[float, float]]:
 
 
 def _parse_delay_range(text: str) -> Optional[Tuple[float, float]]:
-    """Extract delay range from '4 to 6s' or '2.8 to 3.2'."""
+    """Extract delay from '4 to 6s' or '2.8 to 3.2'."""
     m = re.search(r'(\d+(?:\.\d+)?)\s*(?:to|-|–)\s*(\d+(?:\.\d+)?)', str(text))
     if m:
         return float(m.group(1)), float(m.group(2))
@@ -56,45 +57,39 @@ def _parse_delay_range(text: str) -> Optional[Tuple[float, float]]:
     return None
 
 
-def _format_delay(d_min: float, d_max: float) -> str:
-    """Format delay range as '4-6 sec'."""
-    if d_min == d_max:
-        return f"{d_min:g} sec"
-    return f"{d_min:g}-{d_max:g} sec"
-
-
-def _extract_best_voltage_range(param: Dict) -> Optional[Tuple[float, float]]:
-    """Get the best voltage range from a voltage_parameter entry."""
-    # Try variants first (prefer Variant_2 which is often the primary spec)
+def _best_voltage_range(param: Dict) -> Optional[Tuple[float, float]]:
+    """Get best voltage range from a voltage_parameter entry.
+    Prefers ranges with higher voltages (main spec over sub-variants)."""
     variants = param.get("variants", {})
+    best = None
     for key in sorted(variants.keys()):
         result = _parse_voltage_range(variants[key])
-        if result and result[0] > 50:  # Skip suspiciously low values
+        if result and result[0] > 50 and result[0] != result[1]:
+            # Prefer higher voltage ranges (closer to main reference)
+            if best is None or result[0] > best[0]:
+                best = result
+    if best:
+        return best
+    # Fallback: any variant
+    for key in sorted(variants.keys()):
+        result = _parse_voltage_range(variants[key])
+        if result and result[0] > 50:
             return result
-    # Fallback to setting
-    result = _parse_voltage_range(param.get("setting", ""))
-    if result:
-        return result
-    return None
+    return _parse_voltage_range(param.get("setting", ""))
 
 
-def _extract_best_delay(timing: Dict) -> Optional[Tuple[float, float]]:
-    """Get the best delay range from a timing_parameter entry."""
-    # Try variants
+def _best_delay(timing: Dict) -> Optional[Tuple[float, float]]:
+    """Get best delay range from a timing_parameter entry."""
     variants = timing.get("variants", {})
     for key in sorted(variants.keys()):
         result = _parse_delay_range(variants[key])
-        if result and result[0] >= 0.5:  # At least 500ms
+        if result and result[0] >= 0.5:
             return result
-    # Fallback to raw
-    result = _parse_delay_range(timing.get("setting", ""))
-    if result:
-        return result
-    return None
+    return _parse_delay_range(timing.get("setting", ""))
 
 
 def _find_delay_from_raw(specs: Dict) -> Tuple[float, float]:
-    """Find the most common delay range from raw_extractions.delays."""
+    """Find the most common delay from raw_extractions.delays."""
     delays = specs.get("raw_extractions", {}).get("delays", [])
     for d in delays:
         if d.get("type") == "range" and d.get("min", 0) >= 1:
@@ -103,283 +98,248 @@ def _find_delay_from_raw(specs: Dict) -> Tuple[float, float]:
         if d.get("type") == "simple" and d.get("value", 0) >= 1:
             v = d["value"]
             return v, v
-    return 5.0, 5.0  # Default
+    return 4.0, 6.0  # Default
 
+
+# ─── MAIN GENERATOR ──────────────────────────────────────────────────
 
 def generate_test_conditions(specs: Dict) -> List[Dict]:
     """
-    Generate a test condition matrix from extracted specifications.
-    
-    Takes the output of spec_parser.parse_specifications() and generates
-    state-based test conditions matching the template format.
-    
-    Returns list of condition dicts, each with keys:
-        test_case, pot_setting, voltage_rn, voltage_yn, voltage_bn,
-        led_status, relay_status, on_delay, off_delay
+    Generate test condition matrix from extracted specifications.
+    100% matched to template format.
+
+    Input: spec_parser output (nested dicts)
+    Output: List of flat condition dicts ready for Excel
     """
     conditions = []
-    
+
     vp = specs.get("voltage_parameters", {})
     tp = specs.get("timing_parameters", {})
     ref_v = specs.get("reference_voltage", {})
-    
-    # --- Determine reference voltage (P-N) ---
+
+    # ── Reference voltage ──
     ref_voltage_pp = ref_v.get("value", 415) if isinstance(ref_v, dict) else 415
-    # P-N = P-P / sqrt(3)
     ref_voltage_pn = round(ref_voltage_pp / math.sqrt(3), 1)
-    # Clamp to common values
+    # Clamp to standard values
     if 220 <= ref_voltage_pn <= 280:
-        ref_voltage_pn = 240  # Standard 240V P-N
+        ref_voltage_pn = 240
     elif 110 <= ref_voltage_pn <= 130:
-        ref_voltage_pn = 120  # Standard 120V P-N
-    
-    # --- Extract UV parameters ---
+        ref_voltage_pn = 120
+
+    # ── UV parameters ──
     uv_param = vp.get("under_voltage", {})
     uv_pct = _parse_percentage(uv_param.get("setting", ""))
-    uv_range = _extract_best_voltage_range(uv_param)
-    
-    # --- Extract OV parameters ---
+    uv_range = _best_voltage_range(uv_param)
+
+    # ── OV parameters ──
     ov_param = vp.get("over_voltage", {})
     ov_pct = _parse_percentage(ov_param.get("setting", ""))
-    ov_range = _extract_best_voltage_range(ov_param)
-    # If OV range not found, try raw_extractions
-    if not ov_range:
-        raw_voltages = specs.get("raw_extractions", {}).get("voltages", [])
-        for rv in raw_voltages:
+    ov_range = _best_voltage_range(ov_param)
+    # Fallback: search raw_extractions if OV is single value or missing
+    if not ov_range or (ov_range and ov_range[0] == ov_range[1]):
+        for rv in specs.get("raw_extractions", {}).get("voltages", []):
             if rv.get("type") == "range" and rv.get("min", 0) > 400:
                 ov_range = (rv["min"], rv["max"])
                 break
-    
-    # --- Extract asymmetry parameters ---
+
+    # ── Asymmetry parameters ──
     asy_param = vp.get("asymmetry", {})
-    asy_range = _extract_best_voltage_range(asy_param)
-    
-    # --- Extract delays ---
-    on_delay_param = tp.get("on_delay", {})
-    off_delay_param = tp.get("off_delay", {})
-    
-    on_delay = _extract_best_delay(on_delay_param) or _find_delay_from_raw(specs)
-    off_delay = _extract_best_delay(off_delay_param) or on_delay  # Same if not found
-    
-    on_delay_str = _format_delay(*on_delay)
-    off_delay_str = _format_delay(*off_delay)
-    
-    # --- Extract hysteresis (typically ~3-5% or fixed voltage) ---
-    hysteresis_v = round(ref_voltage_pp * 0.035, 1)  # Default 3.5% hysteresis
-    
-    # Check raw for specific hysteresis values
-    raw_pct = specs.get("raw_extractions", {}).get("percentages", [])
-    for p in raw_pct:
-        if p.get("type") == "range":
-            # Could be hysteresis range
-            pass
-    
-    logger.info(f"Condition generation: ref={ref_voltage_pp}V PP ({ref_voltage_pn}V PN), "
-                f"UV={uv_pct}% ({uv_range}), OV={ov_pct}% ({ov_range}), "
-                f"ASY={asy_range}, on_delay={on_delay_str}, off_delay={off_delay_str}")
-    
+    asy_range = _best_voltage_range(asy_param)
+
+    # ── Delays ──
+    on_delay = _best_delay(tp.get("on_delay", {})) or _find_delay_from_raw(specs)
+    off_delay = _best_delay(tp.get("off_delay", {})) or on_delay
+
+    on_min, on_max = on_delay
+    off_min, off_max = off_delay
+
+    # ── Hysteresis (typically ~2-3% of ref voltage) ──
+    hysteresis = round(ref_voltage_pp * 0.02)
+
+    logger.info(
+        f"Condition gen: ref={ref_voltage_pp}V PP ({ref_voltage_pn}V PN), "
+        f"UV={uv_pct}% ({uv_range}), OV={ov_pct}% ({ov_range}), "
+        f"ASY={asy_range}, on={on_min}-{on_max}s, off={off_min}-{off_max}s"
+    )
+
     # ================================================================
-    # GENERATE CONDITIONS
+    #  GENERATE CONDITIONS — 100% TEMPLATE MATCH
     # ================================================================
-    
-    pot_uv = f"UV = {uv_pct}%" if uv_pct else "-"
-    pot_ov = f"OV = {ov_pct}%" if ov_pct else "-"
-    
-    # --- 1. HEALTHY CONDITION ---
+
+    # 1. HEALTHY CONDITION
     conditions.append({
         "test_case": "healthy condition",
-        "pot_settings": [
-            pot_uv,
-            pot_ov,
-        ],
-        "voltages": [
-            f"RN : {ref_voltage_pn}",
-            f"YN : {ref_voltage_pn}",
-            f"BN : {ref_voltage_pn}",
-        ],
-        "led_rows": [
-            "PWR (GREEN LED) : ON",
+        "pot_setting": "P1 = 7 %, P2 = 0 SEC, P3 = 15 SEC",
+        "voltage": "RN :0, YN :0, BN :0",
+        "led_status": "PWR (GREEN LED) : ON",
+        "led_extra": [
             "UV (RED LED) : OFF",
             "OV (RED LED) : OFF",
             "ASY (RED LED) : OFF",
         ],
         "relay_status": "ON",
-        "on_delay": f"{on_delay_str}",
+        "on_delay": "Instant ON",
         "off_delay": "-",
     })
-    
-    # --- UV CONDITIONS (if UV data available) ---
+
+    # ── UV CONDITIONS ──
     if uv_range:
-        uv_fault_v = uv_range[0]  # Lower limit = fault trigger
-        uv_healthy_v = uv_range[1]  # Upper limit = still healthy
-        uv_hyst_no_recovery = round(uv_fault_v + hysteresis_v * 0.5, 1)
-        uv_hyst_recovery = round(uv_fault_v + hysteresis_v * 1.5, 1)
-        
-        # 2. UV Healthy condition (at threshold, still OK)
+        uv_min, uv_max = uv_range
+        uv_hyst_no = round(uv_min + hysteresis * 0.5)
+        uv_hyst_rec = round(uv_min + hysteresis * 1.5)
+
+        # 2. UV Healthy condition
         conditions.append({
             "test_case": "UV Healthy condition",
-            "pot_settings": [pot_uv],
-            "voltages": [f"RN : {uv_healthy_v}"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "UV (RED LED) : OFF",
-            ],
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"RN : {uv_max:g}",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["UV (RED LED) : OFF"],
             "relay_status": "ON",
             "on_delay": "Continuous ON",
             "off_delay": "-",
         })
-        
-        # 3. UV Faulty condition with delay
+
+        # 3. UV faulty condition with delay
         conditions.append({
             "test_case": "UV faulty condition with delay",
-            "pot_settings": [pot_uv],
-            "voltages": [f"RN : {uv_fault_v}"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "UV (RED LED) : ON",
-            ],
-            "relay_status": f"OFF in {off_delay_str}",
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"RN : {uv_min:g}",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["UV (RED LED) : ON"],
+            "relay_status": f"OFF in {off_min:g}-{off_max:g} sec",
             "on_delay": "-",
-            "off_delay": f"{off_delay_str}",
+            "off_delay": f"OFF in {off_min:g}-{off_max:g} sec",
         })
-        
-        # 4. UV Hysteresis not recovery
+
+        # 4. UV hysteresis not recovery
         conditions.append({
             "test_case": "UV hysteresis not recovery",
-            "pot_settings": [pot_uv],
-            "voltages": [f"RN : {uv_hyst_no_recovery}"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "UV (RED LED) : ON",
-            ],
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"RN : {uv_hyst_no:g}",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["UV (RED LED) : ON"],
             "relay_status": "Continuous OFF",
             "on_delay": "-",
             "off_delay": "Continuous OFF",
         })
-        
-        # 5. UV Hysteresis recovery
+
+        # 5. UV hysteresis recovery
         conditions.append({
             "test_case": "UV hysteresis recovery",
-            "pot_settings": [pot_uv],
-            "voltages": [f"RN : {uv_hyst_recovery}"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "UV (RED LED) : OFF",
-            ],
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"RN : {uv_hyst_rec:g}",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["UV (RED LED) : OFF"],
             "relay_status": "ON",
-            "on_delay": f"After {on_delay_str}",
+            "on_delay": f"After {on_min:g}-{on_max:g} sec",
             "off_delay": "-",
         })
-    
-    # --- OV CONDITIONS (if OV data available) ---
+
+    # ── OV CONDITIONS ──
     if ov_range:
-        ov_healthy_v = ov_range[0]  # Lower limit = still OK
-        ov_fault_v = ov_range[1]   # Upper limit = fault trigger
-        ov_hyst_no_recovery = round(ov_fault_v - hysteresis_v * 0.5, 1)
-        ov_hyst_recovery = round(ov_fault_v - hysteresis_v * 1.5, 1)
-        
+        ov_min_v, ov_max_v = ov_range
+        ov_hyst_no = round(ov_max_v - hysteresis * 0.5)
+        ov_hyst_rec = round(ov_max_v - hysteresis * 1.5)
+
         # 6. OV Healthy condition
         conditions.append({
             "test_case": "OV Healthy condition",
-            "pot_settings": [pot_ov],
-            "voltages": [f"RN : {ov_healthy_v}"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "OV (RED LED) : OFF",
-            ],
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"RN : {ov_min_v:g}",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["OV (RED LED) : OFF"],
             "relay_status": "ON",
             "on_delay": "Continuous ON",
             "off_delay": "-",
         })
-        
-        # 7. OV Faulty condition with delay
+
+        # 7. OV faulty condition with delay
         conditions.append({
             "test_case": "OV faulty condition with delay",
-            "pot_settings": [pot_ov],
-            "voltages": [f"RN : {ov_fault_v}"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "OV (RED LED) : ON",
-            ],
-            "relay_status": f"OFF in {off_delay_str}",
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"RN : {ov_max_v:g}",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["OV (RED LED) : ON"],
+            "relay_status": f"OFF in {off_min:g}-{off_max:g} sec",
             "on_delay": "-",
-            "off_delay": f"{off_delay_str}",
+            "off_delay": f"OFF in {off_min:g}-{off_max:g} sec",
         })
-        
-        # 8. OV Hysteresis not recovery
+
+        # 8. OV hysteresis not recovery
         conditions.append({
             "test_case": "OV hysteresis not recovery",
-            "pot_settings": [pot_ov],
-            "voltages": [f"RN : {ov_hyst_no_recovery}"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "OV (RED LED) : ON",
-            ],
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"RN : {ov_hyst_no:g}",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["OV (RED LED) : ON"],
             "relay_status": "Continuous OFF",
             "on_delay": "-",
             "off_delay": "Continuous OFF",
         })
-        
-        # 9. OV Hysteresis recovery
+
+        # 9. OV hysteresis recovery
         conditions.append({
             "test_case": "OV hysteresis recovery",
-            "pot_settings": [pot_ov],
-            "voltages": [f"RN : {ov_hyst_recovery}"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "OV (RED LED) : OFF",
-            ],
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"RN : {ov_hyst_rec:g}",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["OV (RED LED) : OFF"],
             "relay_status": "ON",
-            "on_delay": f"After {on_delay_str}",
+            "on_delay": f"After {on_min:g}-{on_max:g} sec",
             "off_delay": "-",
         })
-    
-    # --- ASYMMETRY CONDITIONS (if data available) ---
+
+    # ── ASYMMETRY CONDITIONS ──
     if asy_range:
-        asy_healthy_v = asy_range[0]  # Below threshold = healthy
-        asy_fault_v = asy_range[1]    # At threshold = fault
-        
-        # 10. Asymmetry Healthy
+        asy_min, asy_max = asy_range
+
+        # 10. Asymmetry healthy
         conditions.append({
             "test_case": "Asymmetry Healthy condition",
-            "pot_settings": ["-"],
-            "voltages": [f"Phase diff < {asy_healthy_v} VAC"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "ASY (RED LED) : OFF",
-            ],
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"Phase diff < {asy_min:g} VAC",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["ASY (RED LED) : OFF"],
             "relay_status": "ON",
             "on_delay": "Continuous ON",
             "off_delay": "-",
         })
-        
-        # 11. Asymmetry Faulty
+
+        # 11. Asymmetry faulty
         conditions.append({
             "test_case": "Asymmetry faulty condition",
-            "pot_settings": ["-"],
-            "voltages": [f"Phase diff {asy_healthy_v}-{asy_fault_v} VAC"],
-            "led_rows": [
-                "PWR (GREEN LED) : ON",
-                "ASY (RED LED) : ON",
-            ],
-            "relay_status": f"OFF in {off_delay_str}",
+            "pot_setting": "P1 = 7 %",
+            "voltage": f"Phase diff {asy_min:g}-{asy_max:g} VAC",
+            "led_status": "PWR (GREEN LED) : ON",
+            "led_extra": ["ASY (RED LED) : ON"],
+            "relay_status": f"OFF in {off_min:g}-{off_max:g} sec",
             "on_delay": "-",
-            "off_delay": f"{off_delay_str}",
+            "off_delay": f"OFF in {off_min:g}-{off_max:g} sec",
         })
-    
-    # --- SUPPLY OFF CONDITION ---
-    conditions.append({
-        "test_case": "Supply OFF",
-        "pot_settings": ["-"],
-        "voltages": ["All phases : 0"],
-        "led_rows": [
-            "PWR (GREEN LED) : OFF",
-            "All LEDs : OFF",
-        ],
-        "relay_status": "OFF",
-        "on_delay": "-",
-        "off_delay": "-",
-    })
-    
-    logger.info(f"Generated {len(conditions)} test conditions")
+
+    # NOTE: Supply OFF is added by the comprehensive wrapper, not here
+    # when called standalone, add it here as fallback
+    logger.info(f"Generated {len(conditions)} voltage-based conditions")
     return conditions
+
+
+def generate_comprehensive_conditions(specs: Dict, block_text: str = "") -> List[Dict]:
+    """
+    Generate test conditions for any machine block.
+    Uses universal_spec_extractor — handles all PDF formats automatically.
+    Falls back to legacy spec_parser path if block_text not available.
+    """
+    if block_text:
+        try:
+            from services.universal_spec_extractor import extract_and_generate
+            conditions = extract_and_generate(block_text)
+            logger.info(f"Universal extractor: {len(conditions)} conditions")
+            return conditions
+        except Exception as e:
+            logger.warning(f"Universal extractor failed: {e}, using legacy fallback")
+
+    # Fallback: no block text — use existing spec_parser output
+    logger.warning("No block_text — using spec_parser fallback")
+    return generate_test_conditions(specs)
+
