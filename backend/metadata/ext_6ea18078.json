@@ -1,0 +1,117 @@
+{
+  "extraction_id": "ext_6ea18078",
+  "original_filename": "WI.pdf",
+  "saved_as": "ext_6ea18078_WI.pdf",
+  "num_pages": 62,
+  "num_machines": 11,
+  "machines": [
+    "MACHINE_1",
+    "MACHINE_2",
+    "MAG03D0424",
+    "MACHINE_4",
+    "MACHINE_5",
+    "MACHINE_6",
+    "MACHINE_7",
+    "MACHINE_8",
+    "MACHINE_9",
+    "MACHINE_10",
+    "MACHINE_11"
+  ],
+  "machine_details": [
+    {
+      "machine": "MACHINE_1",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 1
+    },
+    {
+      "machine": "MACHINE_2",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 1
+    },
+    {
+      "machine": "MAG03D0424",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 85
+    },
+    {
+      "machine": "MACHINE_4",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 0
+    },
+    {
+      "machine": "MACHINE_5",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 0
+    },
+    {
+      "machine": "MACHINE_6",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 0
+    },
+    {
+      "machine": "MACHINE_7",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 0
+    },
+    {
+      "machine": "MACHINE_8",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 0
+    },
+    {
+      "machine": "MACHINE_9",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 0
+    },
+    {
+      "machine": "MACHINE_10",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 0
+    },
+    {
+      "machine": "MACHINE_11",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_steps": 1
+    }
+  ],
+  "status": "completed",
+  "uploaded_at": "2026-03-04T09:27:58.285098",
+  "processed_at": "2026-03-04T09:27:58.285108",
+  "text_files": [],
+  "excel_files": [
+    "ext_6ea18078_MACHINE_1.xlsx",
+    "ext_6ea18078_MACHINE_2.xlsx",
+    "ext_6ea18078_MAG03D0424.xlsx",
+    "ext_6ea18078_MACHINE_4.xlsx",
+    "ext_6ea18078_MACHINE_5.xlsx",
+    "ext_6ea18078_MACHINE_6.xlsx",
+    "ext_6ea18078_MACHINE_7.xlsx",
+    "ext_6ea18078_MACHINE_8.xlsx",
+    "ext_6ea18078_MACHINE_9.xlsx",
+    "ext_6ea18078_MACHINE_10.xlsx",
+    "ext_6ea18078_MACHINE_11.xlsx"
+  ],
+  "json_files": []
+}
