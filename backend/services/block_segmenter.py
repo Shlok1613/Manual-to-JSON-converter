@@ -1,3 +1,5 @@
+# backend/services/block_segmenter.py
+
 """
 Block Segmentation Service - SMART TABLE-AWARE VERSION
 Splits extracted PDF text into separate machine/product blocks.
@@ -60,14 +62,10 @@ def has_table_spec(block_text: str) -> bool:
     ))
 
 # Use pattern library for machine detection
-try:
-    from services.pattern_library import UniversalPatternLibrary as Patterns
-    MACHINE_NAME_PATTERN = Patterns.MACHINE_NAME_REGEX
-except ImportError:
-    MACHINE_NAME_PATTERN = re.compile(
-        r'\b(SPPR|SM\d+_[A-Z]|SM\d+|DSMR|DMS\d+|DMA\d+|MAG\w+|MAC\w+|MG\d+\w+|MD\d+\w+|MB\d+\w+)\b',
-        re.IGNORECASE
-    )
+MACHINE_NAME_PATTERN = re.compile(
+    r'\b(SPPR|SM\d+_[A-Z]|SM\d+|DSMR|DMS\d+|DMA\d+|MAG\w+|MAC\w+|MG\d+\w+|MD\d+\w+|MB\d+\w+)\b',
+    re.IGNORECASE
+)
 
 # SCOPE pattern for WI-format PDFs (e.g., "SCOPE : MAG03D0424 / MAG03D0425")
 SCOPE_PATTERN = re.compile(r'SCOPE\s*:\s*([\w/\s]+)', re.IGNORECASE)

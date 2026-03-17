@@ -80,12 +80,49 @@ def create_specifications_sheet(ws, machine: str, specs: Dict):
     - Voltage parameters (with variants if present)
     - Timing parameters (with variants if present)
     """
+
     current_row = 1
     
     # Title
     ws.cell(row=current_row, column=1, value=f"Specifications: {machine}")
     ws.cell(row=current_row, column=1).font = Font(bold=True, size=14)
     current_row += 2
+
+    # Detect universal spec format (has 'ref_pn' key)
+    if 'ref_pn' in specs:
+        pn = specs.get('ref_pn', 240)
+        write_subheader(ws, current_row, 1, "Extracted Specifications", span_cols=2)
+        current_row += 1
+
+        rows = [
+            ("Reference Voltage (Ph-N)", f"{pn:.0f} VAC"),
+        ]
+        for uv in specs.get('uv', [])[:2]:
+            rows.append(("UV Range", f"{uv[0]:g} to {uv[1]:g} VAC"))
+        for ov in specs.get('ov', [])[:2]:
+            rows.append(("OV Range", f"{ov[0]:g} to {ov[1]:g} VAC"))
+        for ap in specs.get('asy_pct', [])[:1]:
+            rows.append(("Asymmetry", f"{ap[0]:g}% to {ap[1]:g}%"))
+        for av in specs.get('asy_v', [])[:1]:
+            rows.append(("Asymmetry (V)", f"{av[0]:g} to {av[1]:g} VAC"))
+        d_on = specs.get('delay_on', (4, 6))
+        d_off = specs.get('delay_off', (4, 6))
+        on_s = f"{d_on[0]:g}-{d_on[1]:g} sec" if d_on[0] != d_on[1] else f"{d_on[0]:g} sec"
+        off_s = f"{d_off[0]:g}-{d_off[1]:g} sec" if d_off[0] != d_off[1] else f"{d_off[0]:g} sec"
+        rows.append(("ON Delay", on_s))
+        rows.append(("OFF Delay", off_s))
+        rows.append(("Phase Fail", "Yes" if specs.get('phase_fail') else "No"))
+        rows.append(("Phase Reverse", "Yes" if specs.get('phase_rev') else "No"))
+        rows.append(("Neutral Fail", "Yes" if specs.get('neutral') else "No"))
+        rows.append(("Virtual Neutral", "Yes" if specs.get('virtual_neutral') else "No"))
+
+        for label, value in rows:
+            write_data_row(ws, current_row, [label, value])
+            current_row += 1
+
+        set_column_widths(ws, {"A": 28, "B": 25})
+        logger.info(f"Created specifications sheet for {machine}")
+        return
     
     # Reference voltage
     if specs.get("reference_voltage"):

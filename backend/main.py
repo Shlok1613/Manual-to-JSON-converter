@@ -133,42 +133,25 @@ async def extract_pdf(file: UploadFile = File(...)):
         num_machines = 0
         summary = f"Segmentation failed: {str(e)}"
 
-    # STEP 5.5: Extract tables, specs, AND generate comprehensive test conditions
+    
+    # STEP 5.5: Generate test conditions per machine block
     processed_blocks = []
     try:
-        from services.table_extractor import extract_tables
-        from services.spec_parser import parse_specifications
-        from services.condition_generator import generate_comprehensive_conditions
-        
+        from services.universal_spec_extractor import extract_specs, extract_and_generate
+
         for block in blocks:
-            # 1. Extract tables from this block
-            tables = extract_tables(block["text"])
-            
-            # 2. Parse voltage specifications (Sheet 1: Specifications)
-            specs = parse_specifications(block["text"], tables)
-            
-            # 3. Generate COMPREHENSIVE test conditions (voltage + procedures)
-            test_conditions = generate_comprehensive_conditions(specs, block["text"])
-            
-            # Add all data to block
-            block["tables"] = tables
-            block["specifications"] = specs
-            block["num_tables"] = len(tables)
+            spec = extract_specs(block["text"])
+            test_conditions = extract_and_generate(block["text"])
+            block["spec_data"] = spec
             block["test_conditions"] = test_conditions
             block["num_test_conditions"] = len(test_conditions)
-            
             processed_blocks.append(block)
-            
-            logger.info(f"{block['machine']}: {len(tables)} tables, "
-                       f"{len(specs['voltage_parameters'])} voltage params, "
-                       f"{len(specs['timing_parameters'])} timing params, "
-                       f"{len(test_conditions)} comprehensive conditions")
-        
+        logger.info(f"{block['machine']}: {len(test_conditions)} conditions")
+
     except Exception as e:
-        logger.error(f"Extraction failed: {e}")
+        logger.error(f"Condition generation failed: {e}")
         import traceback
         traceback.print_exc()
-        # Use blocks without extracted data if it fails
         processed_blocks = blocks
     
     # STEP 6: Text files DISABLED (not needed - only Excel outputs)
@@ -183,7 +166,7 @@ async def extract_pdf(file: UploadFile = File(...)):
             filename = generate_excel(
                 extraction_id,
                 block["machine"],
-                block.get("specifications", {}),
+                block.get("spec_data", {}),     # ← was block.get("specifications", {})
                 OUTPUT_DIR,
                 test_conditions=block.get("test_conditions", [])
             )
@@ -207,9 +190,6 @@ async def extract_pdf(file: UploadFile = File(...)):
         "machine_details": [
             {
                 "machine": block["machine"],
-                "num_tables": block.get("num_tables", 0),
-                "num_voltage_params": len(block.get("specifications", {}).get("voltage_parameters", {})),
-                "num_timing_params": len(block.get("specifications", {}).get("timing_parameters", {})),
                 "num_test_conditions": block.get("num_test_conditions", 0),
             }
             for block in processed_blocks
