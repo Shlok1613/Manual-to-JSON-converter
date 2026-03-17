@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Extraction</title>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+.glass {
+  background: rgba(15,23,42,0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+</style>
+
+</head>
+
+<body class="min-h-screen text-white font-sans selection:bg-cyan-500/30 overflow-x-hidden"
+style="background: #020617; background-image: radial-gradient(circle at top right, rgba(30, 58, 138, 0.4), transparent 40%), radial-gradient(circle at bottom left, rgba(15, 23, 42, 0.8), transparent 40%);">
+
+<!-- TOAST CONTAINER -->
+<div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-3"></div>
+
+<!-- CONFIRMATION MODAL -->
+<div id="delete-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity opacity-0">
+  <div class="glass p-8 rounded-2xl max-w-sm w-full shadow-2xl transform scale-95 transition-transform opacity-0 translate-y-4 duration-300" id="delete-modal-content">
+    <div class="flex items-center gap-4 mb-4 text-red-400">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+      <h3 class="text-xl font-bold">Confirm Deletion</h3>
+    </div>
+    <p class="text-slate-300 mb-6" id="delete-modal-message">Are you sure you want to delete this?</p>
+    
+    <div class="flex gap-3 justify-end">
+      <button onclick="closeModal()" class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition text-sm font-medium">Cancel</button>
+      <button id="confirm-delete-btn" class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 transition text-sm font-medium text-white flex items-center justify-center gap-2 min-w-[100px]">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="max-w-7xl mx-auto px-6 md:px-12 py-8">
+
+<!-- TOP -->
+<div class="flex justify-between items-center mb-8">
+  <button onclick="window.location.href='/'"
+    class="flex items-center gap-2 px-4 py-2 bg-slate-800/80 border border-slate-700 rounded-lg hover:bg-slate-700 hover:border-slate-600 transition-colors shadow-sm">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+    </svg>
+    <span>Back to Dashboard</span>
+  </button>
+
+  <div id="header-status" class="px-4 py-1.5 bg-slate-800/50 border border-slate-700 text-slate-400 rounded-full text-sm font-medium flex items-center gap-2 shadow-sm">
+    <div class="w-4 h-4 rounded-full border-2 border-slate-500 border-t-transparent animate-spin"></div>
+    Loading Status...
+  </div>
+</div>
+
+<h1 class="text-3xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400 mb-2 truncate" id="title" title="Loading...">
+  <div class="h-10 w-64 bg-slate-800 rounded animate-pulse"></div>
+</h1>
+<p class="text-slate-400 font-mono text-sm mb-10" id="id-display"></p>
+
+<!-- MAIN CONTENT WRAPPER -->
+<div id="content" class="space-y-8 relative">
+  <!-- SKELETON LOADERS -->
+  <div class="grid md:grid-cols-2 gap-8" id="skeleton-loader">
+    <div class="glass p-6 rounded-2xl border border-slate-700/50">
+      <div class="h-7 w-48 bg-slate-800 rounded animate-pulse mb-6"></div>
+      <div class="space-y-4">
+        <div class="h-4 w-full bg-slate-800 rounded animate-pulse"></div>
+        <div class="h-4 w-3/4 bg-slate-800 rounded animate-pulse"></div>
+        <div class="h-4 w-5/6 bg-slate-800 rounded animate-pulse"></div>
+      </div>
+      <div class="h-10 w-32 bg-slate-800 rounded animate-pulse mt-8"></div>
+    </div>
+    <div class="glass p-6 rounded-2xl border border-slate-700/50">
+      <div class="h-7 w-40 bg-slate-800 rounded animate-pulse mb-6"></div>
+      <div class="space-y-3">
+        <div class="h-16 w-full bg-slate-800 rounded animate-pulse"></div>
+        <div class="h-16 w-full bg-slate-800 rounded animate-pulse"></div>
+        <div class="h-16 w-full bg-slate-800 rounded animate-pulse"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+const API = "http://127.0.0.1:8000";
+const urlParams = new URLSearchParams(window.location.search);
+const id = urlParams.get("id");
+
+// --- UTILS: TOASTS & MODALS ---
+function showToast(message, type = 'success') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  const bgClass = type === 'success' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-100' : 'bg-red-500/20 border-red-500/50 text-red-100';
+  const icon = type === 'success' 
+    ? `<svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`
+    : `<svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`;
+
+  toast.className = `flex items-center gap-3 px-4 py-3 rounded-xl border backdrop-blur-md shadow-lg transform transition-all duration-300 translate-x-full opacity-0 ${bgClass}`;
+  toast.innerHTML = `${icon} <span class="font-medium text-sm">${message}</span>`;
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => toast.classList.remove('translate-x-full', 'opacity-0'));
+
+  setTimeout(() => {
+    toast.classList.add('translate-x-full', 'opacity-0');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+let deleteConfig = { id: null, deletePdf: false };
+
+function confirmDelete(extractionId, deletePdf) {
+  deleteConfig = { id: extractionId, deletePdf: deletePdf };
+  
+  const modal = document.getElementById('delete-modal');
+  const modalContent = document.getElementById('delete-modal-content');
+  const modalMessage = document.getElementById('delete-modal-message');
+  
+  if (modalMessage) {
+    modalMessage.innerText = deletePdf 
+      ? "Are you sure you want to delete this extraction AND the original PDF? This action cannot be undone."
+      : "Are you sure you want to delete the extracted results? The original PDF will remain.";
+  }
+
+  if (modal && modalContent) {
+    modal.classList.remove('hidden');
+    setTimeout(() => {
+      modal.classList.remove('opacity-0');
+      modalContent.classList.remove('opacity-0', 'translate-y-4', 'scale-95');
+    }, 10);
+  }
+}
+
+function closeModal() {
+  const modal = document.getElementById('delete-modal');
+  const modalContent = document.getElementById('delete-modal-content');
+  if (modal && modalContent) {
+    modal.classList.add('opacity-0');
+    modalContent.classList.add('opacity-0', 'translate-y-4', 'scale-95');
+    setTimeout(() => {
+      modal.classList.add('hidden');
+      deleteConfig = { id: null, deletePdf: false };
+    }, 300);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const confirmBtn = document.getElementById('confirm-delete-btn');
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', async () => {
+      if (deleteConfig.id) {
+        await executeDelete(deleteConfig.id, deleteConfig.deletePdf);
+        closeModal();
+      }
+    });
+  }
+});
+
+async function executeDelete(extractionId, deletePdf) {
+  try {
+    const res = await fetch(`${API}/api/extraction/${extractionId}?delete_pdf=${deletePdf}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Extraction deleted successfully. Redirecting...', 'success');
+      setTimeout(() => { window.location.href = '/'; }, 1500);
+    } else {
+      const data = await res.json();
+      showToast(data.detail || 'Failed to delete extraction', 'error');
+    }
+  } catch (err) {
+    showToast('Network error during deletion', 'error');
+  }
+}
+
+// --- FILE DOWNLOAD UTILS ---
+function downloadExcel(url, filename) {
+  showToast(`Downloading ${filename}...`, 'success');
+  // Create an invisible anchor to trigger browser download
+  const link = document.createElement('a');
+  link.href = `${API}${url}`;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+// --- MAIN LOAD LOGIC ---
+async function loadExtraction() {
+  if (!id) {
+    document.getElementById("content").innerHTML = `<div class="text-red-400 p-6 glass rounded-2xl">Error: No Extraction ID provided in URL.</div>`;
+    document.getElementById("skeleton-loader").remove();
+    return;
+  }
+
+  try {
+    // Fetch detailed metadata/files info
+    const res = await fetch(`${API}/api/files/${id}`);
+    if (!res.ok) throw new Error('Failed to load extraction data');
+    const responseData = await res.json();
+    const data = responseData.metadata; // the extraction specific JSON
+    const files = responseData.files || [];
+
+    // Header updates
+    document.getElementById("title").innerText = data.original_filename || id;
+    document.getElementById("title").title = data.original_filename || id;
+    document.getElementById("id-display").innerText = `ID: ${id}`;
+    
+    const isFailed = data.status === 'failed';
+    const statusEl = document.getElementById("header-status");
+    if (isFailed) {
+      statusEl.className = "px-4 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-full text-sm font-medium flex items-center gap-2 shadow-sm";
+      statusEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> Processing Failed`;
+    } else {
+      statusEl.className = "px-4 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full text-sm font-medium flex items-center gap-2 shadow-sm";
+      statusEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> Completed Successfully`;
+    }
+
+    // Process Machines UI
+    let machinesHTML = '';
+    if (data.machine_details && data.machine_details.length > 0) {
+      machinesHTML = data.machine_details.map(m => {
+        // Find if an excel file exists for this machine. Typically named something like ext_123_MACHINE.xlsx
+        const machineFile = files.find(f => {
+          const name = f.filename.toLowerCase();
+          const machine = m.machine.toLowerCase();
+
+          return name.includes(machine) && name.endsWith('.xlsx');
+        });
+                
+        let downloadBtnHtml = '';
+        if (machineFile) {
+          downloadBtnHtml = `
+            <button onclick="downloadExcel('${machineFile.download_url}', '${machineFile.filename}')" class="p-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 rounded-lg transition-colors border border-blue-500/20 flex items-center gap-2 group/btn" title="Download Excel for ${m.machine}">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transform group-hover/btn:-translate-y-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span class="text-xs font-medium">Excel</span>
+            </button>`;
+        } else {
+           downloadBtnHtml = `<span class="text-xs text-slate-500 px-2 py-1 rounded bg-slate-800">No Excel</span>`;
+        }
+
+        return `
+          <div class="group bg-slate-800/40 border border-slate-700/50 p-4 rounded-xl flex justify-between items-center hover:bg-slate-700/40 hover:border-cyan-500/30 transition-all">
+            <div class="flex items-center gap-3">
+              <div class="p-2 bg-slate-700 rounded-lg text-slate-300">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <div>
+                <span class="font-medium text-slate-200 block">${m.machine}</span>
+                <span class="text-xs text-slate-400">${data.original_filename}</span>
+              </div>
+            </div>
+            
+            <div class="flex items-center gap-4">
+              <span class="text-cyan-400 font-medium bg-cyan-900/20 px-3 py-1 rounded-full text-sm border border-cyan-500/20">
+                ${m.num_test_conditions || 0} Conditions
+              </span>
+              ${downloadBtnHtml}
+            </div>
+          </div>
+        `;
+      }).join("");
+    } else {
+      machinesHTML = `<div class="p-6 text-center text-slate-500 bg-slate-800/20 rounded-xl border border-dashed border-slate-700">No machine units detected.</div>`;
+    }
+
+    document.getElementById("content").innerHTML = `
+    <div class="grid lg:grid-cols-3 gap-8 items-start">
+
+      <!-- SUMMARY PANEL (1/3 width) -->
+      <div class="glass p-8 rounded-3xl border border-slate-700/50 shadow-xl overflow-hidden relative">
+        <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-cyan-500 to-blue-600 opacity-50"></div>
+        <h2 class="text-xl font-bold mb-6 text-white flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Extraction Summary
+        </h2>
+
+        <div class="space-y-4 mb-8">
+          <div class="flex justify-between items-center pb-3 border-b border-slate-700/50">
+            <span class="text-slate-400">Pages Processed</span>
+            <span class="font-semibold text-white bg-slate-800 px-3 py-1 rounded-full">${data.num_pages || "-"}</span>
+          </div>
+          <div class="flex justify-between items-center pb-3 border-b border-slate-700/50">
+            <span class="text-slate-400">Machines Found</span>
+            <span class="font-semibold text-white bg-slate-800 px-3 py-1 rounded-full">${data.num_machines}</span>
+          </div>
+          <div class="flex justify-between items-center pb-3 border-b border-slate-700/50">
+            <span class="text-slate-400">Upload Date</span>
+            <span class="text-sm text-slate-300">${new Date(data.uploaded_at).toLocaleDateString()}</span>
+          </div>
+        </div>
+
+        <button onclick="showJSON()" class="w-full py-3 mb-3 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-xl transition-colors font-medium flex justify-center items-center gap-2 shadow-sm">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+          </svg>
+          View Raw JSON Metadata
+        </button>
+      </div>
+
+      <!-- MACHINES PANEL (2/3 width) -->
+      <div class="lg:col-span-2 glass p-8 rounded-3xl border border-slate-700/50 shadow-xl">
+        <h2 class="text-xl font-bold mb-6 text-white flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+          Detected Machines (${data.num_machines})
+        </h2>
+        <div class="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+          ${machinesHTML}
+        </div>
+      </div>
+
+    </div>
+
+    <!-- DANGER ZONE -->
+    <div class="glass mt-10 p-8 rounded-3xl border border-red-500/30 overflow-hidden relative">
+      <div class="absolute inset-x-0 top-0 h-1 bg-red-500/50"></div>
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <h2 class="text-red-400 text-xl font-bold mb-2 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            Danger Zone
+          </h2>
+          <p class="text-slate-400 text-sm max-w-xl">Deleting resources is permanent. Once deleted, they cannot be recovered. Choose whether to remove just the results or the original source PDF as well.</p>
+        </div>
+
+        <div class="flex flex-wrap gap-4 shrink-0">
+          <button onclick="confirmDelete('${id}', false)" class="px-5 py-2.5 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl hover:bg-red-500/20 hover:text-red-300 transition font-medium flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Delete Results Only
+          </button>
+
+          <button onclick="confirmDelete('${id}', true)" class="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white shadow shadow-red-500/20 rounded-xl transition font-medium flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Delete Results & PDF
+          </button>
+        </div>
+      </div>
+    </div>
+    `;
+
+  } catch (error) {
+    document.getElementById("content").innerHTML = `
+      <div class="text-red-400 p-6 glass rounded-2xl border border-red-500/30 flex items-center gap-3">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        Error loading extraction data: ${error.message}
+      </div>
+    `;
+    document.getElementById("title").innerText = "Error";
+    document.getElementById("header-status").className = "hidden";
+  }
+}
+
+async function showJSON() {
+  try {
+    const res = await fetch(`${API}/api/extraction/${id}`);
+    const data = await res.json();
+    // Use a modal in a real app, fallback to alert with better formatting
+    alert("Raw JSON Data\n\n" + JSON.stringify(data, null, 2));
+  } catch (e) {
+    showToast("Failed to fetch JSON", "error");
+  }
+}
+
+// Start sequence
+loadExtraction();
+</script>
+
+<style>
+  /* Custom Scrollbar for Machines panel */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.4);
+    border-radius: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(71, 85, 105, 0.8);
+    border-radius: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.8);
+  }
+</style>
+
+</body>
+</html>

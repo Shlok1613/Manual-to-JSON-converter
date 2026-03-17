@@ -1,0 +1,99 @@
+{
+  "extraction_id": "ext_c6e43578",
+  "original_filename": "FUnctional Testing WI_Five series.pdf",
+  "saved_as": "ext_c6e43578_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 9,
+  "machines": [
+    "SPPR",
+    "SM301",
+    "SM500",
+    "MG73BQ",
+    "SM500_A",
+    "SM501_B",
+    "DSMR",
+    "DMS120",
+    "DMS12024"
+  ],
+  "machine_details": [
+    {
+      "machine": "SPPR",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_conditions": 0
+    },
+    {
+      "machine": "SM301",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_conditions": 0
+    },
+    {
+      "machine": "SM500",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_conditions": 0
+    },
+    {
+      "machine": "MG73BQ",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_conditions": 0
+    },
+    {
+      "machine": "SM500_A",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_conditions": 0
+    },
+    {
+      "machine": "SM501_B",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_conditions": 0
+    },
+    {
+      "machine": "DSMR",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_conditions": 0
+    },
+    {
+      "machine": "DMS120",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_conditions": 0
+    },
+    {
+      "machine": "DMS12024",
+      "num_tables": 0,
+      "num_voltage_params": 0,
+      "num_timing_params": 0,
+      "num_test_conditions": 0
+    }
+  ],
+  "status": "completed",
+  "uploaded_at": "2026-03-05T21:35:42.410508",
+  "processed_at": "2026-03-05T21:35:42.410516",
+  "text_files": [],
+  "excel_files": [
+    "ext_c6e43578_SPPR.xlsx",
+    "ext_c6e43578_SM301.xlsx",
+    "ext_c6e43578_SM500.xlsx",
+    "ext_c6e43578_MG73BQ.xlsx",
+    "ext_c6e43578_SM500_A.xlsx",
+    "ext_c6e43578_SM501_B.xlsx",
+    "ext_c6e43578_DSMR.xlsx",
+    "ext_c6e43578_DMS120.xlsx",
+    "ext_c6e43578_DMS12024.xlsx"
+  ],
+  "json_files": []
+}
