@@ -169,8 +169,15 @@ async function executeDelete(extractionId, deletePdf) {
   try {
     const res = await fetch(`${API}/api/extraction/${extractionId}?delete_pdf=${deletePdf}`, { method: 'DELETE' });
     if (res.ok) {
-      showToast('Extraction deleted successfully. Redirecting...', 'success');
-      setTimeout(() => { window.location.href = '/'; }, 1500);
+      if (deletePdf) {
+        // Full delete — go back to dashboard
+        showToast('Extraction fully deleted. Redirecting...', 'success');
+        setTimeout(() => { window.location.href = '/'; }, 1500);
+      } else {
+        // Results-only — reload page to reflect new state (no Excels, PDF still accessible)
+        showToast('Results deleted. Original PDF is preserved.', 'success');
+        setTimeout(() => { window.location.reload(); }, 1200);
+      }
     } else {
       const data = await res.json();
       showToast(data.detail || 'Failed to delete extraction', 'error');
@@ -194,7 +201,7 @@ function downloadExcel(url, filename) {
 
 // --- MAIN LOAD LOGIC ---
 async function loadExtraction() {
-  if (!id) {
+  if (!id){
     document.getElementById("content").innerHTML = `<div class="text-red-400 p-6 glass rounded-2xl">Error: No Extraction ID provided in URL.</div>`;
     document.getElementById("skeleton-loader").remove();
     return;
@@ -202,8 +209,20 @@ async function loadExtraction() {
 
   try {
     // Fetch detailed metadata/files info
-    const res = await fetch(`${API}/api/files/${id}`);
-    if (!res.ok) throw new Error('Failed to load extraction data');
+   const res = await fetch(`${API}/api/files/${id}`);
+
+    if (!res.ok) {
+      // 🔥 If extraction deleted → redirect to dashboard
+      if (res.status === 404) {
+        showToast("Extraction not found or deleted", "error");
+        setTimeout(() => {
+          window.location.href = "/";
+        }, 1200);
+        return;
+      }
+
+      throw new Error('Failed to load extraction data');
+    }
     const responseData = await res.json();
     const data = responseData.metadata; // the extraction specific JSON
     const files = responseData.files || [];
@@ -245,7 +264,12 @@ async function loadExtraction() {
               <span class="text-xs font-medium">Excel</span>
             </button>`;
         } else {
-           downloadBtnHtml = `<span class="text-xs text-slate-500 px-2 py-1 rounded bg-slate-800">No Excel</span>`;
+          downloadBtnHtml = `<span class="text-xs font-medium text-amber-400 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 flex items-center gap-1">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Results Deleted
+          </span>`;
         }
 
         return `
@@ -276,6 +300,28 @@ async function loadExtraction() {
       machinesHTML = `<div class="p-6 text-center text-slate-500 bg-slate-800/20 rounded-xl border border-dashed border-slate-700">No machine units detected.</div>`;
     }
 
+    // Check if original PDF is available
+    let pdfAvailable = false;
+    try {
+      const pdfCheck = await fetch(`${API}/api/pdf/${id}`, { method: 'HEAD' });
+      pdfAvailable = pdfCheck.ok;
+    } catch (_) { pdfAvailable = false; }
+
+    const pdfBtnHtml = pdfAvailable
+      ? `<a href="${API}/api/pdf/${id}" download
+           class="w-full py-3 mb-3 bg-cyan-800/30 hover:bg-cyan-700/40 text-cyan-400 border border-cyan-500/30 rounded-xl transition-colors font-medium flex justify-center items-center gap-2 shadow-sm">
+           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+           </svg>
+           Download Original PDF
+         </a>`
+      : `<div class="w-full py-3 mb-3 bg-slate-800/30 text-slate-600 border border-dashed border-slate-700 rounded-xl font-medium flex justify-center items-center gap-2 text-sm cursor-not-allowed">
+           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+           </svg>
+           PDF Deleted
+         </div>`;
+
     document.getElementById("content").innerHTML = `
     <div class="grid lg:grid-cols-3 gap-8 items-start">
 
@@ -303,6 +349,8 @@ async function loadExtraction() {
             <span class="text-sm text-slate-300">${new Date(data.uploaded_at).toLocaleDateString()}</span>
           </div>
         </div>
+
+        ${pdfBtnHtml}
 
         <button onclick="showJSON()" class="w-full py-3 mb-3 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-xl transition-colors font-medium flex justify-center items-center gap-2 shadow-sm">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -29,8 +29,13 @@ function showToast(message, type = 'success') {
   }, 3000);
 }
 
+// deleteTargetId stores { id, deletePdf } for the confirmation modal
 let deleteTargetId = null;
 
+/**
+ * Called from the history card trash icon on the dashboard.
+ * Opens the modal with both delete-mode options.
+ */
 function confirmDelete(id, event) {
   if (event) event.stopPropagation();
   deleteTargetId = id;
@@ -38,7 +43,6 @@ function confirmDelete(id, event) {
   const modalContent = document.getElementById('delete-modal-content');
   if (modal && modalContent) {
     modal.classList.remove('hidden');
-    // slight delay for animation to trigger
     setTimeout(() => {
       modal.classList.remove('opacity-0');
       modalContent.classList.remove('opacity-0', 'translate-y-4', 'scale-95');
@@ -59,36 +63,59 @@ function closeModal() {
   }
 }
 
-// Bind modal confirm button if it exists
+// Bind modal buttons
 document.addEventListener('DOMContentLoaded', () => {
-  const confirmBtn = document.getElementById('confirm-delete-btn');
-  if (confirmBtn) {
-    confirmBtn.addEventListener('click', async () => {
+  // "Delete Results Only" button
+  const resultsOnlyBtn = document.getElementById('confirm-delete-results-btn');
+  if (resultsOnlyBtn) {
+    resultsOnlyBtn.addEventListener('click', async () => {
       if (deleteTargetId) {
-        await executeDelete(deleteTargetId);
+        await executeDelete(deleteTargetId, false);
+        closeModal();
+      }
+    });
+  }
+
+  // "Delete Results & PDF" button
+  const fullDeleteBtn = document.getElementById('confirm-delete-full-btn');
+  if (fullDeleteBtn) {
+    fullDeleteBtn.addEventListener('click', async () => {
+      if (deleteTargetId) {
+        await executeDelete(deleteTargetId, true);
         closeModal();
       }
     });
   }
 });
 
-async function executeDelete(id) {
+/**
+ * Execute deletion.
+ * deletePdf=false → only remove Excel outputs, keep card in history (list reloads)
+ * deletePdf=true  → full delete, remove card from UI immediately
+ */
+async function executeDelete(id, deletePdf = false) {
   try {
-    const res = await fetch(`${API}/api/extraction/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API}/api/extraction/${id}?delete_pdf=${deletePdf}`, { method: 'DELETE' });
     if (res.ok) {
-      showToast('Extraction deleted successfully', 'success');
-      // Optimistic update
-      const itemElement = document.getElementById(`ext-item-${id}`);
-      if (itemElement) {
-        itemElement.classList.add('opacity-0', 'scale-95');
-        setTimeout(() => {
-          itemElement.remove();
-          // Update analytics visually
-          const totalExt = document.getElementById("totalExtractions");
-          if (totalExt) totalExt.innerText = Math.max(0, parseInt(totalExt.innerText) - 1);
-        }, 300);
+      if (deletePdf) {
+        // Full delete: remove the card from DOM, update counters
+        showToast('Extraction fully deleted', 'success');
+        const itemElement = document.getElementById(`ext-item-${id}`);
+        if (itemElement) {
+          itemElement.style.transition = 'opacity 0.3s, transform 0.3s';
+          itemElement.style.opacity = '0';
+          itemElement.style.transform = 'scale(0.95)';
+          setTimeout(() => {
+            itemElement.remove();
+            loadAnalytics();
+          }, 300);
+        } else {
+          loadHistory();
+          loadAnalytics();
+        }
       } else {
-        // Refetch if element not found directly
+        // Results-only delete: entry still exists in DB, refresh the list
+        showToast('Results deleted. Original PDF preserved.', 'success');
         loadHistory();
         loadAnalytics();
       }
@@ -198,21 +225,6 @@ style.textContent = `
   }
 `;
 document.head.appendChild(style);
-
-  document.getElementById("result").innerHTML = `
-    <div class="bg-slate-700 p-4 rounded-xl shadow-md">
-      <p><strong>ID:</strong> ${data.extraction_id}</p>
-      <p><strong>Pages:</strong> ${data.num_pages}</p>
-      <p><strong>Machines:</strong> ${data.num_machines}</p>
-      <button onclick="viewExtraction('${data.extraction_id}')"
-        class="mt-3 bg-green-500 hover:bg-green-400 px-4 py-1 rounded transition shadow-md">
-        View Details
-      </button>
-    </div>
-  `;
-
-  loadHistory();
-  loadAnalytics();
 
 
 async function loadHistory() {

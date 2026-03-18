@@ -1,7 +1,7 @@
 {
-  "extraction_id": "ext_b07fcec3",
+  "extraction_id": "ext_340b2442",
   "original_filename": "FUnctional Testing WI_Five series.pdf",
-  "saved_as": "ext_b07fcec3_FUnctional_Testing_WI_Five_series.pdf",
+  "saved_as": "ext_340b2442_FUnctional_Testing_WI_Five_series.pdf",
   "num_pages": 20,
   "num_machines": 8,
   "machines": [
@@ -49,18 +49,18 @@
     }
   ],
   "status": "completed",
-  "uploaded_at": "2026-03-17T05:46:19.654913",
-  "processed_at": "2026-03-17T05:46:19.654929",
+  "uploaded_at": "2026-03-18T18:05:38.506089",
+  "processed_at": "2026-03-18T18:05:38.506089",
   "text_files": [],
   "excel_files": [
-    "ext_b07fcec3_SPPR.xlsx",
-    "ext_b07fcec3_SM301.xlsx",
-    "ext_b07fcec3_SM500.xlsx",
-    "ext_b07fcec3_SM500_A.xlsx",
-    "ext_b07fcec3_SM501_B.xlsx",
-    "ext_b07fcec3_DSMR.xlsx",
-    "ext_b07fcec3_DMS12024.xlsx",
-    "ext_b07fcec3_DMS120.xlsx"
+    "ext_340b2442_SPPR.xlsx",
+    "ext_340b2442_SM301.xlsx",
+    "ext_340b2442_SM500.xlsx",
+    "ext_340b2442_SM500_A.xlsx",
+    "ext_340b2442_SM501_B.xlsx",
+    "ext_340b2442_DSMR.xlsx",
+    "ext_340b2442_DMS12024.xlsx",
+    "ext_340b2442_DMS120.xlsx"
   ],
   "json_files": []
 }

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Knowledge Engine</title>
+<title>Extraction Engine</title>
 <script src="https://cdn.tailwindcss.com"></script>
 
 <style>
@@ -34,11 +34,26 @@ style="background: #020617; background-image: radial-gradient(circle at top righ
       </svg>
       <h3 class="text-xl font-bold">Confirm Deletion</h3>
     </div>
-    <p class="text-gray-300 mb-6">Are you sure you want to delete this extraction? This action cannot be undone.</p>
+    <p class="text-gray-300 mb-2">Choose what to delete. <span class="text-red-400 font-medium">This cannot be undone.</span></p>
+    <p class="text-slate-500 text-xs mb-6">"Delete Results Only" keeps your original PDF and the dashboard entry. "Delete Results &amp; PDF" removes everything permanently.</p>
     
-    <div class="flex gap-3 justify-end">
-      <button onclick="closeModal()" class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition text-sm font-medium">Cancel</button>
-      <button id="confirm-delete-btn" class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 transition text-sm font-medium text-white flex items-center justify-center gap-2 min-w-[100px]">Delete</button>
+    <div class="flex flex-col gap-3">
+      <!-- Results Only -->
+      <button id="confirm-delete-results-btn" class="w-full px-4 py-2.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 transition text-sm font-medium flex items-center justify-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        Delete Results Only
+      </button>
+      <!-- Full Delete -->
+      <button id="confirm-delete-full-btn" class="w-full px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-500 transition text-sm font-medium text-white flex items-center justify-center gap-2 shadow shadow-red-500/20">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        Delete Results &amp; PDF
+      </button>
+      <!-- Cancel -->
+      <button onclick="closeModal()" class="w-full px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition text-sm font-medium text-slate-300">Cancel</button>
     </div>
   </div>
 </div>
@@ -54,7 +69,7 @@ style="background: #020617; background-image: radial-gradient(circle at top righ
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
       </div>
-      <span class="text-xl font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400">Knowledge Engine</span>
+      <span class="text-xl font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400">Extraction Engine</span>
     </div>
 
     <div class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium shadow-[0_0_10px_rgba(16,185,129,0.1)]">
@@ -70,7 +85,7 @@ style="background: #020617; background-image: radial-gradient(circle at top righ
   <div class="text-center mb-16 relative">
     <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 h-32 bg-cyan-500/20 blur-[100px] rounded-full pointer-events-none"></div>
     <h1 class="text-5xl md:text-6xl font-extrabold tracking-tight mb-4 relative z-10 text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-100 to-cyan-300">
-      Smart Manufacturing <br/> Knowledge Engine
+      Smart Manufacturing <br/> Extraction Engine
     </h1>
     <p class="text-slate-400 mt-4 text-lg md:text-xl max-w-2xl mx-auto relative z-10 font-light">
       Automatically extract and organize testing conditions and specifications from technical manuals with high precision.
@@ -140,7 +155,7 @@ style="background: #020617; background-image: radial-gradient(circle at top righ
       </div>
 
       <button onclick="uploadFile()" id="extract-btn" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/20 transform transition-all active:scale-[0.98]">
-        <span>Extract Knowledge</span>
+        <span>Extract Specifications</span>
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
         </svg>
@@ -217,6 +232,12 @@ style="background: #020617; background-image: radial-gradient(circle at top righ
       display.classList.add('text-slate-300');
     }
   }
+</script>
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    loadHistory();
+    loadAnalytics();
+  });
 </script>
 </body>
 </html>

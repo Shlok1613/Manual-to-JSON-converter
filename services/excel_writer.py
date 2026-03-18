@@ -559,6 +559,7 @@ def generate_excel(
     safe_machine = machine.replace("/", "_").replace(" ", "_")
     filename = f"{extraction_id}_{safe_machine}.xlsx"
     filepath = output_dir / filename
+    print("SAVING EXCEL TO:", filepath)
     
     # Save workbook
     wb.save(filepath)

@@ -3,14 +3,20 @@ FastAPI main application with unique extraction IDs.
 """
 from pathlib import Path
 from datetime import datetime
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, Request, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 import logging
 import json
 from fastapi.staticfiles import StaticFiles
 
-
 from models.schemas import ExtractionResult, generate_extraction_id
+
+from database import engine
+from models.db_models import Base
+from database import SessionLocal
+from models.db_models import ExtractionDB
+
+Base.metadata.create_all(bind=engine)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -153,6 +159,8 @@ async def extract_pdf(file: UploadFile = File(...)):
         import traceback
         traceback.print_exc()
         processed_blocks = blocks
+
+    print("TOTAL BLOCKS:", len(processed_blocks))
     
     # STEP 6: Text files DISABLED (not needed - only Excel outputs)
     text_files = []
@@ -162,7 +170,11 @@ async def extract_pdf(file: UploadFile = File(...)):
     try:
         from services.excel_writer import generate_excel
         
+        print("STARTING EXCEL GENERATION")
+
         for block in processed_blocks:
+            print("PROCESSING MACHINE:", block["machine"])
+
             filename = generate_excel(
                 extraction_id,
                 block["machine"],
@@ -170,6 +182,7 @@ async def extract_pdf(file: UploadFile = File(...)):
                 OUTPUT_DIR,
                 test_conditions=block.get("test_conditions", [])
             )
+            #print("SAVING FILE TO:", OUTPUT_DIR / filename)
             excel_files.append(filename)
             logger.info(f"Generated Excel: {filename}")
         
@@ -205,6 +218,25 @@ async def extract_pdf(file: UploadFile = File(...)):
     metadata_path = METADATA_DIR / f"{extraction_id}.json"
     metadata_path.write_text(json.dumps(metadata, indent=2))
     logger.info(f"Saved metadata: {metadata_path.name}")
+
+    # STEP 7.5: Save to database
+    from database import SessionLocal
+    from models.db_models import ExtractionDB
+
+    db = SessionLocal()
+
+    db_entry = ExtractionDB(
+        extraction_id=extraction_id,
+        filename=file.filename,
+        num_pages=num_pages,
+        num_machines=num_machines,
+        status="completed",
+        uploaded_at=datetime.utcnow().isoformat()
+    )
+
+    db.add(db_entry)
+    db.commit()
+    db.close()
     
     # STEP 8: Return result (UPDATED!)
     result = ExtractionResult(
@@ -315,83 +347,115 @@ def list_extraction_files(extraction_id: str):
 def list_extractions(limit: int = 50):
     """
     List all extractions.
-    
+
     URL: /api/extractions?limit=50
-    
-    Returns list of extraction metadata.
-    Useful for database/UI to show history.
+
+    Returns list of extraction metadata. Filters out ghost DB entries
+    (rows whose metadata JSON file no longer exists on disk).
     """
-    metadata_files = sorted(
-        METADATA_DIR.glob("ext_*.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True  # Newest first
-    )
-    
+    from database import SessionLocal
+    from models.db_models import ExtractionDB
+
+    db = SessionLocal()
+    data = db.query(ExtractionDB).order_by(ExtractionDB.uploaded_at.desc()).all()
+    db.close()
+
     extractions = []
-    for meta_file in metadata_files[:limit]:
-        if "_error" in meta_file.name:
-            continue  # Skip error files
-        
-        try:
-            metadata = json.loads(meta_file.read_text())
-            extractions.append(metadata)
-        except Exception as e:
-            logger.warning(f"Failed to read {meta_file.name}: {e}")
-    
+    for e in data:
+        meta_path = METADATA_DIR / f"{e.extraction_id}.json"
+        if not meta_path.exists():
+            # Ghost DB entry — metadata file missing; skip it
+            logger.warning(f"Ghost DB entry detected (no metadata): {e.extraction_id}")
+            continue
+        extractions.append({
+            "extraction_id": e.extraction_id,
+            "original_filename": e.filename,
+            "num_machines": e.num_machines,
+            "uploaded_at": e.uploaded_at,
+            "status": e.status
+        })
+
     return {
         "total": len(extractions),
         "extractions": extractions
     }
+    
+# extractions = []
+#     for meta_file in metadata_files[:limit]:
+#         if "_error" in meta_file.name:
+#             continue  # Skip error files
+        
+#         try:
+#             metadata = json.loads(meta_file.read_text())
+#             extractions.append(metadata)
+#         except Exception as e:
+#             logger.warning(f"Failed to read {meta_file.name}: {e}")
+    
+#     return {
+#         "total": len(extractions),
+#         "extractions": extractions
+#     }
 
 @app.delete("/api/extraction/{extraction_id}")
 def delete_extraction(extraction_id: str, delete_pdf: bool = False):
     """
-    Delete an extraction and all its generated files.
-    
-    Args:
-        extraction_id: Extraction ID (e.g., ext_abc12345)
-        delete_pdf: If True, also delete the uploaded PDF (default: False)
-    
-    Returns:
-        Success message with deleted file count
-    
-    Usage:
-        DELETE /api/extraction/ext_abc12345
-        DELETE /api/extraction/ext_abc12345?delete_pdf=true
+    Delete an extraction.
+
+    If delete_pdf=false (default – "Delete Results Only"):
+      - Deletes Excel output files from outputs/
+      - KEEPS metadata JSON, DB entry, and original PDF
+
+    If delete_pdf=true ("Delete Results & PDF"):
+      - Deletes Excel output files
+      - Deletes metadata JSON
+      - Deletes DB entry
+      - Deletes original uploaded PDF
     """
-    
-    # Check if extraction exists
+
+    extraction_id = extraction_id.strip()
     metadata_path = METADATA_DIR / f"{extraction_id}.json"
-    
+
     if not metadata_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Extraction {extraction_id} not found"
-        )
-    
+        # Metadata gone — only clean up DB if this is a full delete
+        if delete_pdf:
+            db = SessionLocal()
+            entry = db.query(ExtractionDB).filter(
+                ExtractionDB.extraction_id == extraction_id
+            ).first()
+            if entry:
+                db.delete(entry)
+                db.commit()
+            db.close()
+        return {
+            "status": "already_deleted",
+            "message": "Metadata not found",
+            "results_deleted": True,
+            "pdf_deleted": delete_pdf
+        }
+
     deleted_files = []
     errors = []
-    
+
     try:
-        # 1. Delete all Excel files in outputs/
+        # ── Step 1: Always delete output (Excel) files ──────────────────────
         for file_path in OUTPUT_DIR.glob(f"{extraction_id}_*"):
             try:
                 file_path.unlink()
                 deleted_files.append(file_path.name)
-                logger.info(f"Deleted: {file_path.name}")
+                logger.info(f"Deleted output file: {file_path.name}")
             except Exception as e:
                 errors.append(f"Failed to delete {file_path.name}: {str(e)}")
-        
-        # 2. Delete metadata JSON
-        try:
-            metadata_path.unlink()
-            deleted_files.append(metadata_path.name)
-            logger.info(f"Deleted metadata: {metadata_path.name}")
-        except Exception as e:
-            errors.append(f"Failed to delete metadata: {str(e)}")
-        
-        # 3. Optionally delete uploaded PDF
+
         if delete_pdf:
+            # ── Step 2 (full delete): remove metadata JSON ──────────────────
+            try:
+                metadata_path.unlink()
+                deleted_files.append(metadata_path.name)
+                logger.info(f"Deleted metadata: {metadata_path.name}")
+            except Exception as e:
+                errors.append(f"Failed to delete metadata: {str(e)}")
+
+            # ── Step 3 (full delete): remove original PDF ───────────────────
             for pdf_path in UPLOAD_DIR.glob(f"{extraction_id}_*"):
                 try:
                     pdf_path.unlink()
@@ -399,23 +463,74 @@ def delete_extraction(extraction_id: str, delete_pdf: bool = False):
                     logger.info(f"Deleted PDF: {pdf_path.name}")
                 except Exception as e:
                     errors.append(f"Failed to delete PDF: {str(e)}")
-        
-        # Return result
+
+            # ── Step 4 (full delete): remove DB entry ───────────────────────
+            db = SessionLocal()
+            entry = db.query(ExtractionDB).filter(
+                ExtractionDB.extraction_id == extraction_id
+            ).first()
+            if entry:
+                db.delete(entry)
+                db.commit()
+            db.close()
+        else:
+            logger.info(
+                f"Results-only delete for {extraction_id}: "
+                "metadata, DB entry, and PDF are preserved."
+            )
+
         return {
             "extraction_id": extraction_id,
             "status": "deleted",
+            "results_deleted": True,
+            "pdf_deleted": delete_pdf,
             "deleted_files": deleted_files,
             "deleted_count": len(deleted_files),
-            "errors": errors if errors else None,
-            "pdf_deleted": delete_pdf
+            "errors": errors if errors else None
         }
-        
+
     except Exception as e:
         logger.error(f"Delete extraction failed: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete extraction: {str(e)}"
         )
+
+
+@app.api_route("/api/pdf/{extraction_id}", methods=["GET", "HEAD"])
+def download_pdf(extraction_id: str, request: Request):
+    """
+    Download or check the original uploaded PDF for an extraction.
+
+    GET  /api/pdf/ext_a3f2b9c1  → returns the PDF file for download
+    HEAD /api/pdf/ext_a3f2b9c1  → returns 200 if PDF exists, 404 if not
+                                   (used by frontend to check availability)
+    """
+    matches = list(UPLOAD_DIR.glob(f"{extraction_id}_*"))
+    pdf_matches = [p for p in matches if p.suffix.lower() == ".pdf"]
+
+    if not pdf_matches:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Original PDF for {extraction_id} not found. It may have been deleted."
+        )
+
+    pdf_path = pdf_matches[0]
+
+    # HEAD request: confirm existence only, no body
+    if request.method == "HEAD":
+        from fastapi.responses import Response
+        return Response(
+            status_code=200,
+            headers={"Content-Type": "application/pdf"}
+        )
+
+    # GET request: serve the file
+    return FileResponse(
+        path=pdf_path,
+        filename=pdf_path.name,
+        media_type="application/pdf"
+    )
 
 
 @app.delete("/api/extraction/{extraction_id}/file/{filename}")
