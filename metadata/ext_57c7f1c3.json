@@ -1,0 +1,24 @@
+{
+  "extraction_id": "ext_57c7f1c3",
+  "original_filename": "WI.pdf",
+  "saved_as": "ext_57c7f1c3_WI.pdf",
+  "num_pages": 62,
+  "num_machines": 1,
+  "machines": [
+    "MAG03D0425"
+  ],
+  "machine_details": [
+    {
+      "machine": "MAG03D0425",
+      "num_test_conditions": 24
+    }
+  ],
+  "status": "completed",
+  "uploaded_at": "2026-03-27T06:43:53.247711",
+  "processed_at": "2026-03-27T06:43:53.247721",
+  "text_files": [],
+  "excel_files": [
+    "ext_57c7f1c3_MAG03D0425.xlsx"
+  ],
+  "json_files": []
+}

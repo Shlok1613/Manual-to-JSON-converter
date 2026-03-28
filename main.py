@@ -3,7 +3,7 @@ FastAPI main application with unique extraction IDs.
 """
 from pathlib import Path
 from datetime import datetime
-from fastapi import FastAPI, File, Request, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, Request, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 import logging
 import json
@@ -47,7 +47,10 @@ METADATA_DIR.mkdir(exist_ok=True)
 
 
 @app.post("/api/extract", response_model=ExtractionResult)
-async def extract_pdf(file: UploadFile = File(...)):
+async def extract_pdf(
+        file: UploadFile = File(...),
+        machine_names: str = Form(default="")
+    ):
     """
     Main extraction endpoint with unique ID generation.
     
@@ -124,7 +127,8 @@ async def extract_pdf(file: UploadFile = File(...)):
         full_text = "\n\n".join(pages)
         
         # Segment into machine blocks
-        blocks = segment_blocks(full_text)
+        user_names = [n.strip() for n in machine_names.split(',') if n.strip()]
+        blocks = segment_blocks(full_text, user_names=user_names if user_names else None)
         num_machines = len(blocks)
         
         # Create summary

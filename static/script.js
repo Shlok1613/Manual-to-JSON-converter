@@ -128,21 +128,85 @@ async function executeDelete(id, deletePdf = false) {
   }
 }
 
+function addMachineSlot() {
+  const container = document.getElementById('machine-inputs');
+  const wrapper = document.createElement('div');
+  wrapper.className = 'flex gap-2';
+  wrapper.innerHTML = `
+    <input type="text"
+           placeholder="e.g. SM500"
+           class="machine-name-input flex-1 bg-slate-800/60 border border-slate-600
+                  rounded-xl px-4 py-2.5 text-white placeholder-slate-500 text-sm
+                  focus:outline-none focus:border-cyan-500/60 transition"/>
+    <button onclick="this.parentElement.remove()"
+            class="px-3 rounded-xl bg-slate-700 hover:bg-red-500/20 text-slate-400
+                   hover:text-red-400 border border-slate-600 transition text-sm">
+      ✕
+    </button>
+  `;
+  container.appendChild(wrapper);
+}
+
+function cancelMachineModal() {
+  const modal = document.getElementById('machine-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  const input = document.getElementById('pdfFile');
+  if (input) { input.value = ''; }
+  if (typeof updateFileName === 'function') updateFileName(input);
+}
+
 async function uploadFile() {
-  const input = document.getElementById("pdfFile");
+  const input = document.getElementById('pdfFile');
   if (!input || !input.files || input.files.length === 0) {
-    showToast("Please select a PDF file first.", "error");
+    showToast('Please select a PDF file first.', 'error');
     return;
   }
-  const file = input.files[0];
 
+  // Reset modal slots to one empty input
+  const container = document.getElementById('machine-inputs');
+  container.innerHTML = `
+    <input type="text"
+           placeholder="e.g. SPPR"
+           class="machine-name-input w-full bg-slate-800/60 border border-slate-600
+                  rounded-xl px-4 py-2.5 text-white placeholder-slate-500 text-sm
+                  focus:outline-none focus:border-cyan-500/60 transition"/>
+  `;
+
+  // Show modal
+  const modal = document.getElementById('machine-modal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+async function startExtraction() {
+  const input = document.getElementById('pdfFile');
+  if (!input || !input.files || input.files.length === 0) {
+    showToast('No file selected.', 'error');
+    cancelMachineModal();
+    return;
+  }
+
+  // Collect non-empty machine names
+  const rawInputs = document.querySelectorAll('.machine-name-input');
+  const machineNames = Array.from(rawInputs)
+    .map(el => el.value.trim().toUpperCase())
+    .filter(name => name.length > 0);
+
+  // Close modal
+  const modal = document.getElementById('machine-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+
+  // --- existing upload logic (identical to original uploadFile body) ---
+  const file = input.files[0];
   const loader = document.getElementById("loader");
   const extractBtn = document.getElementById("extract-btn");
   const resultDiv = document.getElementById("result");
   const dropZoneDiv = document.getElementById("drop-zone");
-  
+
   if (loader) loader.classList.remove("hidden", "flex-col", "flex");
-  if (loader) loader.classList.add("flex"); // Ensure flex is on
+  if (loader) loader.classList.add("flex");
   if (extractBtn) extractBtn.disabled = true;
   if (extractBtn) extractBtn.classList.add("opacity-50", "cursor-not-allowed");
   if (resultDiv) resultDiv.innerHTML = "";
@@ -150,6 +214,7 @@ async function uploadFile() {
 
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("machine_names", machineNames.join(','));
 
   try {
     const response = await fetch(`${API}/api/extract`, {
@@ -158,10 +223,9 @@ async function uploadFile() {
     });
 
     const data = await response.json();
-    
+
     if (response.ok) {
       showToast("Extraction successful!", "success");
-      
       if (resultDiv) {
         resultDiv.innerHTML = `
           <div class="bg-emerald-900/20 border border-emerald-500/30 p-5 rounded-2xl shadow-lg animate-fade-in-up">
@@ -193,10 +257,8 @@ async function uploadFile() {
           </div>
         `;
       }
-      // Reset file input visually
       input.value = "";
       if (typeof updateFileName === 'function') updateFileName(input);
-      
       loadHistory();
       loadAnalytics();
     } else {

@@ -1,0 +1,48 @@
+{
+  "extraction_id": "ext_85aeb324",
+  "original_filename": "WI.pdf",
+  "saved_as": "ext_85aeb324_WI.pdf",
+  "num_pages": 62,
+  "num_machines": 5,
+  "machines": [
+    "MAG03D0424",
+    "MAG03D0425",
+    "MAG03D0426",
+    "MAG03D0427",
+    "MAG03D0428"
+  ],
+  "machine_details": [
+    {
+      "machine": "MAG03D0424",
+      "num_test_conditions": 34
+    },
+    {
+      "machine": "MAG03D0425",
+      "num_test_conditions": 34
+    },
+    {
+      "machine": "MAG03D0426",
+      "num_test_conditions": 34
+    },
+    {
+      "machine": "MAG03D0427",
+      "num_test_conditions": 34
+    },
+    {
+      "machine": "MAG03D0428",
+      "num_test_conditions": 34
+    }
+  ],
+  "status": "completed",
+  "uploaded_at": "2026-03-27T05:20:27.548175",
+  "processed_at": "2026-03-27T05:20:27.548185",
+  "text_files": [],
+  "excel_files": [
+    "ext_85aeb324_MAG03D0424.xlsx",
+    "ext_85aeb324_MAG03D0425.xlsx",
+    "ext_85aeb324_MAG03D0426.xlsx",
+    "ext_85aeb324_MAG03D0427.xlsx",
+    "ext_85aeb324_MAG03D0428.xlsx"
+  ],
+  "json_files": []
+}

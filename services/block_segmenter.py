@@ -136,173 +136,156 @@ def has_incomplete_table_reference(text: str) -> bool:
     return True
 
 
-def segment_blocks(full_text: str) -> List[Dict[str, str]]:
-    """
-    Split full PDF text into separate blocks for each machine/product.
-    
-    SMART LOGIC:
-    1. Uses minimum block size (1000 chars) to avoid tiny fragments
-    2. Checks for incomplete table references before splitting
-    3. Won't split if block references tables that haven't appeared yet
-    
-    This ensures tables are always included in their machine's block,
-    regardless of where they appear in the text.
-    
-    Args:
-        full_text: Complete extracted text from PDF
-    
-    Returns:
-        List of blocks, each containing one machine's complete text
-    """
+def segment_blocks(full_text: str, user_names: list = None) -> List[Dict[str, str]]:
+
+    # Validate user names against actual PDF text
+    if user_names:
+        user_names = [
+            n for n in user_names
+            if re.search(rf'\b{re.escape(n)}\b', full_text, re.IGNORECASE)
+        ]
+        if not user_names:
+            user_names = None
+
+    # Always use proven SECTION_PATTERNS for splitting — never dynamic patterns
     lines = full_text.splitlines()
     blocks = []
-    
-    # Minimum characters for a valid block (to avoid tiny fragments)
     MIN_BLOCK_SIZE = 1000
-    
-    # Start with first block
-    current_block = {
-        "machine": "MACHINE_1",
-        "header": "",
-        "text": ""
-    }
-    
+    current_block = {"machine": "MACHINE_1", "header": "", "text": ""}
+
     for line in lines:
         line_stripped = line.strip()
-        
-        # Skip empty lines but preserve them in text
         if not line_stripped:
             current_block["text"] += "\n"
             continue
-        
-        # Check if this line is a section header
+
         is_new_section = False
         for pattern in SECTION_PATTERNS:
             match = re.search(pattern, line_stripped, flags=re.IGNORECASE)
             if match:
-                # Check if we should start new section
                 block_size = len(current_block["text"].strip())
-                
-                # Check if this is a FORCE SPLIT pattern (always splits)
                 is_force_split = any(
-                    re.search(force_pattern, line_stripped, flags=re.IGNORECASE)
-                    for force_pattern in FORCE_SPLIT_PATTERNS
+                    re.search(fp, line_stripped, flags=re.IGNORECASE)
+                    for fp in FORCE_SPLIT_PATTERNS
                 )
-                
-                # Conditions to ALLOW split:
-                # 1. Current block is empty (always start first block)
-                # 2. Block is large enough AND doesn't have incomplete table references
-                # 3. OR this is a FORCE SPLIT pattern (ignores size check!)
-                
                 allow_split = (
-                    not current_block["text"].strip() or  # Empty block
-                    is_force_split or  # FORCE SPLIT patterns always allowed!
-                    (
-                        block_size > MIN_BLOCK_SIZE and  # Large enough
-                        not has_incomplete_table_reference(current_block["text"])  # No incomplete refs
-                    )
+                    not current_block["text"].strip() or
+                    is_force_split or
+                    (block_size > MIN_BLOCK_SIZE and
+                     not has_incomplete_table_reference(current_block["text"]))
                 )
-                
                 if allow_split:
-                    # Save previous block (if it has content)
                     if current_block["text"].strip():
                         blocks.append(current_block)
-                        logger.info(f"Completed block: {current_block['machine']} ({len(current_block['text'])} chars)")
-                    
-                    # Start new block
                     header_text = match.group(0)
                     machine_name = find_machine_name(
-                        header_text, 
+                        header_text,
                         fallback=f"MACHINE_{len(blocks) + 1}"
                     )
-                    
                     current_block = {
                         "machine": machine_name,
                         "header": header_text,
                         "text": line_stripped + "\n"
                     }
-                    
                     is_new_section = True
-                    logger.info(f"New section detected: {machine_name}")
                     break
                 else:
-                    # Don't split - current block too small or has incomplete table refs
-                    if block_size <= MIN_BLOCK_SIZE:
-                        logger.debug(f"Block too small ({block_size} chars), continuing...")
-                    else:
-                        logger.info(f"Block has incomplete table reference, continuing...")
                     break
-        
-        # If not a section header, add to current block
+
         if not is_new_section:
             current_block["text"] += line_stripped + "\n"
-    
-    # Don't forget the last block!
+
     if current_block["text"].strip():
         blocks.append(current_block)
-        logger.info(f"Completed final block: {current_block['machine']} ({len(current_block['text'])} chars)")
-    
-    # POST-PROCESSING Step 0: Merge short blocks with next block
-    # Some machines (e.g. DSMR) have a 1-line header block followed by content
+
+    # POST-PROCESSING Step 0: Merge short blocks
     MIN_MERGE_LENGTH = 1500
     merged = []
     i = 0
     while i < len(blocks):
         block = blocks[i]
-        if (len(block["text"]) < MIN_MERGE_LENGTH and 
-            not has_table_spec(block["text"]) and 
-            i + 1 < len(blocks)):
-            # Merge header-only block with next block's content
+        if (len(block["text"]) < MIN_MERGE_LENGTH and
+                not has_table_spec(block["text"]) and
+                i + 1 < len(blocks)):
             next_block = blocks[i + 1]
             merged.append({
                 "machine": block["machine"],
                 "header": block.get("header", ""),
                 "text": block["text"] + next_block["text"]
             })
-            logger.info(f"Merged short block {block['machine']} ({len(block['text'])} chars) with next block")
             i += 2
         else:
             merged.append(block)
             i += 1
     blocks = merged
-    
-    # POST-PROCESSING Step 1: Rename MACHINE_X blocks using full block text
+
+    # POST-PROCESSING Step 1: Rename MACHINE_X blocks from block text
     for block in blocks:
         if block["machine"].startswith("MACHINE_"):
             real_name = find_machine_name(block["text"], fallback=block["machine"])
             if real_name != block["machine"]:
-                logger.info(f"Renamed {block['machine']} → {real_name} (from block text)")
                 block["machine"] = real_name
-    
-    # POST-PROCESSING Step 2: Handle SCOPE-based documents (WI.pdf format)
-    # If most blocks resolve to the same machine, check for SCOPE line
-    from collections import Counter
-    name_counts = Counter(b["machine"] for b in blocks)
-    most_common_name, most_common_count = name_counts.most_common(1)[0]
-    # Trigger if ≥70% of blocks share the same name (handles stray MACHINE_X blocks)
-    if len(blocks) > 3 and most_common_count / len(blocks) >= 0.7:
-        # All blocks have same name — likely a SCOPE-based consolidated document
-        combined_text = "\n".join(b["text"] for b in blocks)
-        scope_match = SCOPE_PATTERN.search(combined_text)
-        
-        if scope_match:
-            scope_text = scope_match.group(1)
-            # Extract individual product names from SCOPE (e.g., "MAG03D0424 / MAG03D0425 / ...")
-            scope_products = re.findall(
-                r'(MAG\d+[A-Z0-9]+|MAC\d+[A-Z0-9]+|SM\d+_[A-Z]|SM\d+|MG\d+[A-Z]+)',
-                scope_text, re.IGNORECASE
-            )
-            scope_products = list(dict.fromkeys(p.upper() for p in scope_products))  # Unique, ordered
-            
-            if len(scope_products) > 1:
-                logger.info(f"SCOPE-based document detected with {len(scope_products)} products: {scope_products}")
-                # Create one block per SCOPE product, all sharing the combined text
-                blocks = [
-                    {"machine": prod, "header": f"SCOPE: {prod}", "text": combined_text}
-                    for prod in scope_products
-                ]
-                logger.info(f"Created {len(blocks)} product blocks from SCOPE")
-                return blocks
+
+    # POST-PROCESSING Step 2: If user gave names, filter AND merge by machine name
+    if user_names:
+        user_names_upper = [n.upper() for n in user_names]
+
+        # Keep only blocks whose auto-detected name matches a user-provided name
+        matching = [
+            b for b in blocks
+            if b["machine"].upper() in user_names_upper
+        ]
+
+        # Merge all blocks with the same machine name into one block
+        merged_by_name = {}
+        for block in matching:
+            name = block["machine"].upper()
+            if name not in merged_by_name:
+                merged_by_name[name] = {
+                    "machine": name,
+                    "header": block["header"],
+                    "text": block["text"]
+                }
+            else:
+                merged_by_name[name]["text"] += "\n" + block["text"]
+
+        # Preserve user-input order
+        blocks = [
+            merged_by_name[n] for n in user_names_upper
+            if n in merged_by_name
+        ]
+        logger.info(f"After user-name filter+merge: {[b['machine'] for b in blocks]}")
+
+    # POST-PROCESSING Step 3: SCOPE-based documents (auto-detect only)
+    else:
+        from collections import Counter
+        name_counts = Counter(b["machine"] for b in blocks)
+        most_common_name, most_common_count = name_counts.most_common(1)[0]
+        if len(blocks) > 3 and most_common_count / len(blocks) >= 0.7:
+            combined_text = "\n".join(b["text"] for b in blocks)
+            scope_match = SCOPE_PATTERN.search(combined_text)
+            if scope_match:
+                scope_text = scope_match.group(1)
+                scope_products = re.findall(
+                    r'(MAG\d+[A-Z0-9]+|MAC\d+[A-Z0-9]+|SM\d+_[A-Z]|SM\d+|MG\d+[A-Z]+)',
+                    scope_text, re.IGNORECASE
+                )
+                scope_products = list(dict.fromkeys(p.upper() for p in scope_products))
+                if len(scope_products) > 1:
+                    blocks = [
+                        {"machine": prod, "header": f"SCOPE: {prod}", "text": combined_text}
+                        for prod in scope_products
+                    ]
+                    return blocks
+
+    # POST-PROCESSING Step 4: Deduplicate names (auto-detect only)
+    if user_names is None:
+        machine_counts = {}
+        for block in blocks:
+            machine = block["machine"]
+            machine_counts[machine] = machine_counts.get(machine, 0) + 1
+            if machine_counts[machine] > 1:
+                block["machine"] = f"{machine}_{machine_counts[machine]}"
     
     # POST-PROCESSING Step 3: Clean up duplicate names (non-SCOPE documents)
     machine_counts = {}
