@@ -45,8 +45,6 @@ block_segmenter.py      — splits full text into per-machine blocks
     ↓
 universal_spec_extractor.py  — extracts voltage specs from each block
     ↓
-condition_generator.py  — delegates to universal extractor
-    ↓
 excel_writer.py         — writes structured Excel with 5-row condition format
     ↓
 Output: one .xlsx per machine
