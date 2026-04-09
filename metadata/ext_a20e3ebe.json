@@ -1,0 +1,32 @@
+{
+  "extraction_id": "ext_a20e3ebe",
+  "original_filename": "FUnctional Testing WI_Five series.pdf",
+  "saved_as": "ext_a20e3ebe_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 2,
+  "machines": [
+    "SPPR",
+    "DMS120"
+  ],
+  "machine_details": [
+    {
+      "machine": "SPPR",
+      "num_test_conditions": 28
+    },
+    {
+      "machine": "DMS120",
+      "num_test_conditions": 24
+    }
+  ],
+  "status": "completed",
+  "extraction_method": "regex",
+  "gemini_called": false,
+  "uploaded_at": "2026-04-03T10:40:33.839976",
+  "processed_at": "2026-04-03T10:40:33.839993",
+  "text_files": [],
+  "excel_files": [
+    "ext_a20e3ebe_SPPR.xlsx",
+    "ext_a20e3ebe_DMS120.xlsx"
+  ],
+  "json_files": []
+}

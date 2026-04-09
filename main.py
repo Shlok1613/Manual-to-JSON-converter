@@ -9,6 +9,9 @@ import logging
 import json
 from fastapi.staticfiles import StaticFiles
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from models.schemas import ExtractionResult, generate_extraction_id
 
 from database import engine
@@ -67,6 +70,7 @@ async def extract_pdf(
     # STEP 1: Generate unique ID
     extraction_id = generate_extraction_id()
     logger.info(f"New extraction: {extraction_id} - {file.filename}")
+    extraction_method = "regex"  # tracks which path was taken
     
     # STEP 2: Validate file
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -165,6 +169,38 @@ async def extract_pdf(
         processed_blocks = blocks
 
     print("TOTAL BLOCKS:", len(processed_blocks))
+
+    # STEP 5.7: Gemini quality fallback
+    # Only fires when extraction quality is poor — not on empty/fake input
+    try:
+        from services.gemini_fallback import extraction_quality_poor, call_gemini
+        from services.universal_spec_extractor import generate_conditions
+
+        if extraction_quality_poor(processed_blocks):
+            logger.info("Poor extraction quality — invoking Gemini fallback")
+            extraction_method = "gemini_fallback"
+
+            gemini_blocks = call_gemini(full_text, user_names if user_names else None)
+
+            if gemini_blocks:
+                # Generate conditions from Gemini-provided spec_data
+                processed_blocks = []
+                for block in gemini_blocks:
+                    spec = block["spec_data"]
+                    test_conditions = generate_conditions(spec)
+                    block["test_conditions"] = test_conditions
+                    block["num_test_conditions"] = len(test_conditions)
+                    processed_blocks.append(block)
+                    logger.info(f"Gemini block {block['machine']}: {len(test_conditions)} conditions")
+            else:
+                logger.warning("Gemini returned no blocks — keeping regex output")
+                extraction_method = "regex"
+
+    except Exception as e:
+        logger.error(f"Gemini fallback failed: {e}")
+        import traceback
+        traceback.print_exc()
+        extraction_method = "regex"
     
     # STEP 6: Text files DISABLED (not needed - only Excel outputs)
     text_files = []
@@ -212,6 +248,8 @@ async def extract_pdf(
             for block in processed_blocks
         ],
         "status": "completed",
+        "extraction_method": extraction_method,
+        "gemini_called": extraction_method == "gemini_fallback",
         "uploaded_at": datetime.utcnow().isoformat(),
         "processed_at": datetime.utcnow().isoformat(),
         "text_files": text_files,
