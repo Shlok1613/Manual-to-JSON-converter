@@ -25,7 +25,7 @@ style="background: #020617; background-image: radial-gradient(circle at top righ
 <!-- MACHINE NAMES MODAL -->
 <div id="machine-modal"
      class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm">
-  <div class="glass p-8 rounded-2xl w-full max-w-md shadow-2xl">
+  <div class="glass p-8 rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
 
     <div class="flex items-center gap-3 mb-2">
       <div class="p-2 bg-cyan-500/10 rounded-lg border border-cyan-500/20">
@@ -40,17 +40,11 @@ style="background: #020617; background-image: radial-gradient(circle at top righ
     </div>
 
     <p class="text-slate-400 text-sm mb-5">
-      Type the machine names exactly as they appear in the PDF
-      (e.g. SPPR, SM500, DMS120). Leave blank to auto-detect all machines.
+      Add machines and optionally their sub-machine variants.
+      Leave blank to auto-detect. Sub-machines are extracted using AI column detection.
     </p>
 
-    <div id="machine-inputs" class="space-y-2 mb-4">
-      <input type="text"
-             placeholder="e.g. SPPR"
-             class="machine-name-input w-full bg-slate-800/60 border border-slate-600
-                    rounded-xl px-4 py-2.5 text-white placeholder-slate-500 text-sm
-                    focus:outline-none focus:border-cyan-500/60 transition"/>
-    </div>
+    <div id="machine-slots" class="space-y-3 mb-4"></div>
 
     <button onclick="addMachineSlot()"
             class="w-full py-2 rounded-xl border border-dashed border-slate-600

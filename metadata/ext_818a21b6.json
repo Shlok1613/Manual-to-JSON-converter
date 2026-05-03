@@ -1,0 +1,88 @@
+{
+  "extraction_id": "ext_818a21b6",
+  "original_filename": "test.pdf",
+  "saved_as": "ext_818a21b6_test.pdf",
+  "num_pages": 20,
+  "num_machines": 4,
+  "machines": [
+    "SPPR",
+    "SM301",
+    "DMS120",
+    "SM500"
+  ],
+  "machine_details": [
+    {
+      "machine": "SPPR",
+      "num_test_conditions": 8,
+      "sub_machines": [
+        "TO 357 VAC",
+        "TO 328 VAC",
+        "TO 363",
+        "TO 363 VAC"
+      ],
+      "has_sub_machines": true
+    },
+    {
+      "machine": "SM301",
+      "num_test_conditions": 8,
+      "sub_machines": [
+        "TO 357 VAC",
+        "TO 328 VAC",
+        "TO 363",
+        "TO 363 VAC"
+      ],
+      "has_sub_machines": true
+    },
+    {
+      "machine": "DMS120",
+      "num_test_conditions": 8,
+      "sub_machines": [
+        "TO 357 VAC",
+        "TO 328 VAC",
+        "TO 363",
+        "TO 363 VAC"
+      ],
+      "has_sub_machines": true
+    },
+    {
+      "machine": "SM500",
+      "num_test_conditions": 8,
+      "sub_machines": [
+        "TO 357 VAC",
+        "TO 328 VAC",
+        "TO 363",
+        "TO 363 VAC"
+      ],
+      "has_sub_machines": true
+    }
+  ],
+  "status": "completed",
+  "extraction_method": "regex",
+  "gemini_called": false,
+  "uploaded_at": "2026-04-28T11:27:14.025593",
+  "processed_at": "2026-04-28T11:27:14.025603",
+  "text_files": [],
+  "excel_files": [
+    "ext_818a21b6_SPPR.xlsx",
+    "ext_818a21b6_SPPR_TO_357_VAC.xlsx",
+    "ext_818a21b6_SPPR_TO_328_VAC.xlsx",
+    "ext_818a21b6_SPPR_TO_363.xlsx",
+    "ext_818a21b6_SPPR_TO_363_VAC.xlsx",
+    "ext_818a21b6_SM301.xlsx",
+    "ext_818a21b6_SM301_TO_357_VAC.xlsx",
+    "ext_818a21b6_SM301_TO_328_VAC.xlsx",
+    "ext_818a21b6_SM301_TO_363.xlsx",
+    "ext_818a21b6_SM301_TO_363_VAC.xlsx",
+    "ext_818a21b6_DMS120.xlsx",
+    "ext_818a21b6_DMS120_TO_357_VAC.xlsx",
+    "ext_818a21b6_DMS120_TO_328_VAC.xlsx",
+    "ext_818a21b6_DMS120_TO_363.xlsx",
+    "ext_818a21b6_DMS120_TO_363_VAC.xlsx",
+    "ext_818a21b6_SM500.xlsx",
+    "ext_818a21b6_SM500_TO_357_VAC.xlsx",
+    "ext_818a21b6_SM500_TO_328_VAC.xlsx",
+    "ext_818a21b6_SM500_TO_363.xlsx",
+    "ext_818a21b6_SM500_TO_363_VAC.xlsx"
+  ],
+  "json_files": []
+}

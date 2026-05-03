@@ -1,0 +1,23 @@
+{
+  "extraction_id": "ext_3c0b53d9",
+  "original_filename": "FUnctional Testing WI_Five series.pdf",
+  "saved_as": "ext_3c0b53d9_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 1,
+  "machines": [
+    "SM301"
+  ],
+  "machine_summary": [
+    {
+      "machine": "SM301",
+      "status": "extraction_failed",
+      "variants": []
+    }
+  ],
+  "excel_files": [],
+  "user_input": {
+    "SM301": []
+  },
+  "status": "no_output",
+  "timestamp": "2026-05-01T05:25:38.452481"
+}

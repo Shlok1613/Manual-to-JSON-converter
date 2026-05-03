@@ -1,0 +1,84 @@
+{
+  "extraction_id": "ext_0629ddf1",
+  "original_filename": "FUnctional Testing WI_Five series.pdf",
+  "saved_as": "ext_0629ddf1_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 8,
+  "machines": [
+    "SPPR",
+    "SM301",
+    "SM500",
+    "SM500_A",
+    "SM501_B",
+    "DSMR",
+    "DMS12024",
+    "DMS120"
+  ],
+  "machine_details": [
+    {
+      "machine": "SPPR",
+      "num_test_conditions": 28,
+      "sub_machines": [],
+      "has_sub_machines": false
+    },
+    {
+      "machine": "SM301",
+      "num_test_conditions": 2,
+      "sub_machines": [],
+      "has_sub_machines": false
+    },
+    {
+      "machine": "SM500",
+      "num_test_conditions": 20,
+      "sub_machines": [],
+      "has_sub_machines": false
+    },
+    {
+      "machine": "SM500_A",
+      "num_test_conditions": 20,
+      "sub_machines": [],
+      "has_sub_machines": false
+    },
+    {
+      "machine": "SM501_B",
+      "num_test_conditions": 24,
+      "sub_machines": [],
+      "has_sub_machines": false
+    },
+    {
+      "machine": "DSMR",
+      "num_test_conditions": 24,
+      "sub_machines": [],
+      "has_sub_machines": false
+    },
+    {
+      "machine": "DMS12024",
+      "num_test_conditions": 24,
+      "sub_machines": [],
+      "has_sub_machines": false
+    },
+    {
+      "machine": "DMS120",
+      "num_test_conditions": 24,
+      "sub_machines": [],
+      "has_sub_machines": false
+    }
+  ],
+  "status": "completed",
+  "extraction_method": "regex",
+  "gemini_called": false,
+  "uploaded_at": "2026-04-14T13:10:46.638744",
+  "processed_at": "2026-04-14T13:10:46.638756",
+  "text_files": [],
+  "excel_files": [
+    "ext_0629ddf1_SPPR.xlsx",
+    "ext_0629ddf1_SM301.xlsx",
+    "ext_0629ddf1_SM500.xlsx",
+    "ext_0629ddf1_SM500_A.xlsx",
+    "ext_0629ddf1_SM501_B.xlsx",
+    "ext_0629ddf1_DSMR.xlsx",
+    "ext_0629ddf1_DMS12024.xlsx",
+    "ext_0629ddf1_DMS120.xlsx"
+  ],
+  "json_files": []
+}

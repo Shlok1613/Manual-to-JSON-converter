@@ -1,0 +1,33 @@
+{
+  "extraction_id": "ext_83370d41",
+  "original_filename": "test.pdf",
+  "saved_as": "ext_83370d41_test.pdf",
+  "num_pages": 20,
+  "num_machines": 1,
+  "machines": [
+    "SPPR"
+  ],
+  "machine_details": [
+    {
+      "machine": "SPPR",
+      "num_test_conditions": 28,
+      "sub_machines": [
+        "MGH3BF",
+        "MGH3BY"
+      ],
+      "has_sub_machines": true
+    }
+  ],
+  "status": "completed",
+  "extraction_method": "regex",
+  "gemini_called": false,
+  "uploaded_at": "2026-04-30T10:59:55.432894",
+  "processed_at": "2026-04-30T10:59:55.432910",
+  "text_files": [],
+  "excel_files": [
+    "ext_83370d41_SPPR.xlsx",
+    "ext_83370d41_SPPR_MGH3BF.xlsx",
+    "ext_83370d41_SPPR_MGH3BY.xlsx"
+  ],
+  "json_files": []
+}

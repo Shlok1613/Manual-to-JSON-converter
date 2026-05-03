@@ -1,0 +1,28 @@
+{
+  "extraction_id": "ext_cb44eae4",
+  "original_filename": "FUnctional Testing WI_Five series.pdf",
+  "saved_as": "ext_cb44eae4_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 1,
+  "machines": [
+    "SM500"
+  ],
+  "machine_details": [
+    {
+      "machine": "SM500",
+      "num_test_conditions": 0,
+      "sub_machines": [],
+      "has_sub_machines": false
+    }
+  ],
+  "status": "completed",
+  "extraction_method": "regex",
+  "gemini_called": false,
+  "uploaded_at": "2026-04-30T14:09:24.148443",
+  "processed_at": "2026-04-30T14:09:24.148459",
+  "text_files": [],
+  "excel_files": [
+    "ext_cb44eae4_SM500.xlsx"
+  ],
+  "json_files": []
+}

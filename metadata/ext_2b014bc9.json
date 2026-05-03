@@ -1,0 +1,26 @@
+{
+  "extraction_id": "ext_2b014bc9",
+  "original_filename": "ext_01ac7feb_FUnctional_Testing_WI_Five_series.pdf",
+  "saved_as": "ext_2b014bc9_ext_01ac7feb_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 1,
+  "machines": [
+    "SPPR"
+  ],
+  "machine_summary": [
+    {
+      "machine": "SPPR",
+      "status": "extraction_failed",
+      "variants": []
+    }
+  ],
+  "excel_files": [],
+  "user_input": {
+    "SPPR": [
+      "MAC04D0100",
+      "MAC04D0119"
+    ]
+  },
+  "status": "no_output",
+  "timestamp": "2026-05-01T04:55:10.272394"
+}

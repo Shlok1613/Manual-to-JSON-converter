@@ -1,317 +1,252 @@
-# backend/services/block_segmenter.py
-
+# services/block_segmenter.py
 """
-Block Segmentation Service - SMART TABLE-AWARE VERSION
-Splits extracted PDF text into separate machine/product blocks.
+Block Segmenter — page-aware.
 
-KEY IMPROVEMENTS:
-- Won't split a block if it references tables that haven't appeared yet
-- Uses UniversalPatternLibrary for machine name detection (MAG, MAC, MG, SM, etc.)
-- This prevents cutting off blocks before their TABLE sections appear
-- Works generically for ANY machine with similar layout
+Walks Page objects in order, returns Block objects with page_range and
+the actual Page instances. Vision extractor needs the JPEG bytes downstream,
+so we keep them attached.
 """
 import re
-from typing import List, Dict
 import logging
+from typing import List, Optional
+from collections import Counter
+
+from .types import Page, Block
 
 logger = logging.getLogger(__name__)
 
-# Patterns that indicate a new section/machine is starting
-# IMPORTANT: Order matters! More specific patterns should come FIRST
+
 SECTION_PATTERNS = [
-    r"^Neutral\s+Open\s+SPPR",                           # "Neutral Open SPPR"
-    r"^PROCESS:\s*(.+)",                                 # "PROCESS: Functional Testing"
-    r"^(SM\d+_[A-Z])\s+Functional\s+Testing",            # "SM501_B Functional Testing" (before generic SM pattern!)
-    r"^(SM\d+)\s+(.+Testing)",                           # "SM301 AUTOMATED FUNCTIONAL TESTING"
-    r"^(SM\d+)\s+Functional\s+Testing",                  # "SM500 Functional Testing"
-    r"^Process:\s+Functional\s+Testing\s+(SM\d+)",       # "Process: Functional Testing SM500_A"
-    r"^PROCESS\s*:\s*Functional\s+Testing\s+DSMR",       # "PROCESS : Functional Testing DSMR"
-    r"^Functional\s+Testing\s+table\s+for\s+(\w+)",      # "Functional Testing table for Daikin"
-    r"^For\s+(MG\d+[A-Z]+)\s+product",                   # "For MG73BQ product" - section boundary for MG variants
-    r"^(DMS\d+)",                                         # "DMS110", "DMS120", etc.
-    r"^(MG\d+[A-Z]+)(?:\s+product|:|\s+Functional|\s+CRITICALITY|\s+\(.+Testing)",  # MG + context
-    r"^PROCEDURE\s+FOR\s+(.+?):",                        # "PROCEDURE FOR DMS110:"
-    # Additional patterns for broader coverage
-    r"FUNCTIONAL\s+TEST\s+PROCEDURE\s+FOR\s+([A-Z0-9][A-Z0-9_]{2,})",  # "FUNCTIONAL TEST PROCEDURE FOR SPPR"
-    r"^([A-Z0-9][A-Z0-9_]{2,})\s+(?:AUTOMATED\s+)?FUNCTIONAL\s+TESTING",  # "SM500 FUNCTIONAL TESTING"
-    r"([A-Z]{2,})PROCESS\s*:\s*Functional",              # "SPPRPROCESS: Functional"
-    r"PROCESS\s*:\s*Functional\s+Testing\s+([A-Z0-9][A-Z0-9_]{2,})",  # "PROCESS: Functional Testing SM500_A"
+    r"^Neutral\s+Open\s+SPPR",
+    r"^PROCESS:\s*(.+)",
+    r"^(SM\d+_[A-Z])\s+Functional\s+Testing",
+    r"^(SM\d+)\s+(.+Testing)",
+    r"^(SM\d+)\s+Functional\s+Testing",
+    r"^Process:\s+Functional\s+Testing\s+(SM\d+)",
+    r"^PROCESS\s*:\s*Functional\s+Testing\s+DSMR",
+    r"^Functional\s+Testing\s+table\s+for\s+(\w+)",
+    r"^For\s+(MG\d+[A-Z]+)\s+product",
+    r"^(DMS\d+)",
+    r"^(MG\d+[A-Z]+)(?:\s+product|:|\s+Functional|\s+CRITICALITY|\s+\(.+Testing)",
+    r"^PROCEDURE\s+FOR\s+(.+?):",
+    r"FUNCTIONAL\s+TEST\s+PROCEDURE\s+FOR\s+([A-Z0-9][A-Z0-9_]{2,})",
+    r"^([A-Z0-9][A-Z0-9_]{2,})\s+(?:AUTOMATED\s+)?FUNCTIONAL\s+TESTING",
+    r"([A-Z]{2,})PROCESS\s*:\s*Functional",
+    r"PROCESS\s*:\s*Functional\s+Testing\s+([A-Z0-9][A-Z0-9_]{2,})",
 ]
 
-# Patterns that ALWAYS force a split, even if block is < MIN_BLOCK_SIZE
 FORCE_SPLIT_PATTERNS = [
-    r"^PROCESS:\s*(.+)",                                 # "PROCESS:" - top-level section
-    r"^PROCEDURE\s+FOR\s+(.+?):",                        # "PROCEDURE FOR" - explicit procedure start
-    r"^For\s+(MG\d+[A-Z]+)\s+product",                   # "For MG73BQ product" - always marks new product
+    r"^PROCESS:\s*(.+)",
+    r"^PROCEDURE\s+FOR\s+(.+?):",
+    r"^For\s+(MG\d+[A-Z]+)\s+product",
 ]
 
-# Valid machine name prefixes (filters false positives)
-VALID_PREFIXES = {'SPPR', 'SM', 'MG', 'DMS', 'DMA', 'DSMR', 'MAC', 'MAG', 'MB'}
+MACHINE_NAME_PATTERN = re.compile(
+    r"\b(SPPR|SM\d+_[A-Z]|SM\d+|DSMR|DMS\d+|DMA\d+|MAG\w+|MAC\w+|MG\d+\w+|MD\d+\w+|MB\d+\w+)\b",
+    re.IGNORECASE,
+)
+SCOPE_PATTERN = re.compile(r"SCOPE\s*:\s*([\w/\s]+)", re.IGNORECASE)
 
-def is_valid_machine_name(name: str) -> bool:
-    """Check if name matches a valid machine name pattern."""
-    name = name.upper()
-    return 3 <= len(name) <= 15 and any(name.startswith(p) for p in VALID_PREFIXES)
 
-def has_table_spec(block_text: str) -> bool:
-    """Check if a block contains actual test specification tables."""
+def _find_machine_name(text: str, fallback: str = "UNKNOWN") -> str:
+    sm = SCOPE_PATTERN.search(text)
+    if sm:
+        match = MACHINE_NAME_PATTERN.search(sm.group(1))
+        if match:
+            return match.group(1).upper()
+    match = MACHINE_NAME_PATTERN.search(text)
+    return match.group(1).upper() if match else fallback
+
+
+def _has_table_spec(text: str) -> bool:
     return bool(re.search(
-        r'TABLE\s*\d?\s*\(PRODUCT\s*SETTINGS'
-        r'|Under\s*Voltage\s*\(UV\).*?\d+\s+to\s+\d+\s+VAC',
-        block_text, re.I | re.DOTALL
+        r"TABLE\s*\d?\s*\(PRODUCT\s*SETTINGS"
+        r"|Under\s*Voltage\s*\(UV\).*?\d+\s+to\s+\d+\s+VAC",
+        text, re.I | re.DOTALL,
     ))
 
-# Use pattern library for machine detection
-MACHINE_NAME_PATTERN = re.compile(
-    r'\b(SPPR|SM\d+_[A-Z]|SM\d+|DSMR|DMS\d+|DMA\d+|MAG\w+|MAC\w+|MG\d+\w+|MD\d+\w+|MB\d+\w+)\b',
-    re.IGNORECASE
-)
 
-# SCOPE pattern for WI-format PDFs (e.g., "SCOPE : MAG03D0424 / MAG03D0425")
-SCOPE_PATTERN = re.compile(r'SCOPE\s*:\s*([\w/\s]+)', re.IGNORECASE)
-
-
-def find_machine_name(text: str, fallback: str = "UNKNOWN") -> str:
-    """Extract machine/product name from text.
-    
-    Checks:
-    1. SCOPE line (WI-format) - extracts first MAG/MAC name from SCOPE
-    2. Direct machine name match in text
-    """
-    # Check SCOPE line first (WI-format PDFs)
-    scope_match = SCOPE_PATTERN.search(text)
-    if scope_match:
-        scope_text = scope_match.group(1)
-        # Find first MAG/MAC name in scope
-        machine_match = MACHINE_NAME_PATTERN.search(scope_text)
-        if machine_match:
-            return machine_match.group(1).upper()
-    
-    # Standard machine name detection
-    match = MACHINE_NAME_PATTERN.search(text)
-    if match:
-        return match.group(1).upper()
-    return fallback
-
-
-def has_incomplete_table_reference(text: str) -> bool:
-    """
-    Check if text has VERY RECENT table references that haven't appeared yet.
-    
-    Only blocks splits if table was referenced in the LAST 200 CHARS.
-    This is strict enough to catch "refer table below" → TABLE situations,
-    but loose enough to not block splits for old/external table references.
-    
-    Returns:
-        True if last 200 chars has table reference but no table structure anywhere
-        False otherwise
-    """
-    # Only check the last 200 chars for very recent references
-    recent_text = text[-200:] if len(text) > 200 else text
-    recent_upper = recent_text.upper()
-    
-    # Check for table references in recent text
-    has_reference = bool(
-        re.search(r'REFER\s+(?:THE\s+)?(?:FOLLOWING\s+)?TABLES?', recent_upper) or
-        re.search(r'(?:TABLE|TABLES)\s+(?:BELOW|GIVEN|1|2|01|02)', recent_upper) or
-        re.search(r'AS\s+PER\s+TABLE', recent_upper)
+def _has_incomplete_table_reference(text: str) -> bool:
+    recent = text[-200:] if len(text) > 200 else text
+    recent_u = recent.upper()
+    has_ref = bool(
+        re.search(r"REFER\s+(?:THE\s+)?(?:FOLLOWING\s+)?TABLES?", recent_u)
+        or re.search(r"(?:TABLE|TABLES)\s+(?:BELOW|GIVEN|1|2|01|02)", recent_u)
+        or re.search(r"AS\s+PER\s+TABLE", recent_u)
     )
-    
-    if not has_reference:
-        return False  # No very recent references, OK to split
-    
-    # Check if actual table structures exist in FULL text
-    text_upper = text.upper()
-    has_table_structure = bool(
-        re.search(r'TABLE\s+\d+\s*\(', text_upper) or  # "TABLE 1 ("
-        re.search(r'TABLE\s+\(', text_upper) or         # "TABLE ("
-        re.search(r'TABLE\s+0\d\s*:', text_upper)       # "TABLE 01:"
+    if not has_ref:
+        return False
+    full_u = text.upper()
+    has_struct = bool(
+        re.search(r"TABLE\s+\d+\s*\(", full_u)
+        or re.search(r"TABLE\s+\(", full_u)
+        or re.search(r"TABLE\s+0\d\s*:", full_u)
     )
-    
-    if has_table_structure:
-        return False  # Has both reference AND structure, OK to split
-    
-    # Has VERY RECENT reference (< 200 chars) but no structure
-    logger.info(f"Block has very recent incomplete table reference (in last 200 chars) - preventing split")
-    return True
+    return not has_struct
 
 
-def segment_blocks(full_text: str, user_names: list = None) -> List[Dict[str, str]]:
+def segment_blocks(pages: List[Page], user_names: Optional[List[str]] = None) -> List[Block]:
+    if not pages:
+        return []
 
-    # Validate user names against actual PDF text
+    full_text = "\n\n".join(p.ocr_text for p in pages)
+
     if user_names:
         user_names = [
             n for n in user_names
-            if re.search(rf'\b{re.escape(n)}\b', full_text, re.IGNORECASE)
-        ]
-        if not user_names:
-            user_names = None
+            if re.search(rf"\b{re.escape(n)}\b", full_text, re.IGNORECASE)
+        ] or None
 
-    # Always use proven SECTION_PATTERNS for splitting — never dynamic patterns
-    lines = full_text.splitlines()
-    blocks = []
-    MIN_BLOCK_SIZE = 1000
-    current_block = {"machine": "MACHINE_1", "header": "", "text": ""}
+    MIN_BLOCK_SIZE = 400
+    blocks: List[Block] = []
+    current = Block(machine="MACHINE_1", text="", page_range=[], pages=[])
 
-    for line in lines:
-        line_stripped = line.strip()
-        if not line_stripped:
-            current_block["text"] += "\n"
-            continue
+    for page in pages:
+        # Always claim this page for the current block. If a section break
+        # happens mid-page, both old and new block claim it (intentional).
+        if page.num not in current.page_range:
+            current.page_range.append(page.num)
+            current.pages.append(page)
 
-        is_new_section = False
-        for pattern in SECTION_PATTERNS:
-            match = re.search(pattern, line_stripped, flags=re.IGNORECASE)
-            if match:
-                block_size = len(current_block["text"].strip())
-                is_force_split = any(
-                    re.search(fp, line_stripped, flags=re.IGNORECASE)
-                    for fp in FORCE_SPLIT_PATTERNS
+        for line in page.ocr_text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                current.text += "\n"
+                continue
+
+            split_here = False
+            for pat in SECTION_PATTERNS:
+                m = re.search(pat, stripped, flags=re.IGNORECASE)
+                if not m:
+                    continue
+                size = len(current.text.strip())
+                force = any(re.search(fp, stripped, flags=re.IGNORECASE) for fp in FORCE_SPLIT_PATTERNS)
+                allow = (
+                    not current.text.strip()
+                    or force
+                    or (size > MIN_BLOCK_SIZE and not _has_incomplete_table_reference(current.text))
                 )
-                allow_split = (
-                    not current_block["text"].strip() or
-                    is_force_split or
-                    (block_size > MIN_BLOCK_SIZE and
-                     not has_incomplete_table_reference(current_block["text"]))
-                )
-                if allow_split:
-                    if current_block["text"].strip():
-                        blocks.append(current_block)
-                    header_text = match.group(0)
-                    machine_name = find_machine_name(
-                        header_text,
-                        fallback=f"MACHINE_{len(blocks) + 1}"
+                if allow:
+                    if current.text.strip():
+                        blocks.append(current)
+                    machine_name = _find_machine_name(
+                        m.group(0), fallback=f"MACHINE_{len(blocks) + 1}"
                     )
-                    current_block = {
-                        "machine": machine_name,
-                        "header": header_text,
-                        "text": line_stripped + "\n"
-                    }
-                    is_new_section = True
-                    break
-                else:
-                    break
+                    current = Block(
+                        machine=machine_name,
+                        text=stripped + "\n",
+                        page_range=[page.num],
+                        pages=[page],
+                        header=m.group(0),
+                    )
+                    split_here = True
+                break
+            if not split_here:
+                current.text += stripped + "\n"
 
-        if not is_new_section:
-            current_block["text"] += line_stripped + "\n"
+    if current.text.strip():
+        blocks.append(current)
 
-    if current_block["text"].strip():
-        blocks.append(current_block)
-
-    # POST-PROCESSING Step 0: Merge short blocks
-    MIN_MERGE_LENGTH = 1500
-    merged = []
+    # merge blocks that are too short and lack table specs
+    MIN_MERGE = 1500
+    merged: List[Block] = []
     i = 0
     while i < len(blocks):
-        block = blocks[i]
-        if (len(block["text"]) < MIN_MERGE_LENGTH and
-                not has_table_spec(block["text"]) and
-                i + 1 < len(blocks)):
-            next_block = blocks[i + 1]
-            merged.append({
-                "machine": block["machine"],
-                "header": block.get("header", ""),
-                "text": block["text"] + next_block["text"]
-            })
+        b = blocks[i]
+        if (
+    len(b.text) < MIN_MERGE
+    and not _has_table_spec(b.text)
+    and i + 1 < len(blocks)
+):
+            nxt = blocks[i + 1]
+            new_pages = list(b.pages)
+            new_range = list(b.page_range)
+            for p in nxt.pages:
+                if p.num not in new_range:
+                    new_range.append(p.num)
+                    new_pages.append(p)
+            merged.append(Block(
+                machine=b.machine, text=b.text + nxt.text,
+                page_range=new_range, pages=new_pages, header=b.header,
+            ))
             i += 2
         else:
-            merged.append(block)
+            merged.append(b)
             i += 1
     blocks = merged
 
-    # POST-PROCESSING Step 1: Rename MACHINE_X blocks from block text
-    for block in blocks:
-        if block["machine"].startswith("MACHINE_"):
-            real_name = find_machine_name(block["text"], fallback=block["machine"])
-            if real_name != block["machine"]:
-                block["machine"] = real_name
+    # second-pass machine name resolution
+    for b in blocks:
+        if b.machine.startswith("MACHINE_"):
+            real = _find_machine_name(b.text, fallback=b.machine)
+            if real != b.machine:
+                b.machine = real
 
-    # POST-PROCESSING Step 2: If user gave names, filter AND merge by machine name
+    # SCOPE-based fan-out: consolidated WI documents (SCOPE: A / B / C / ...)
+    scope_fanned = False
+    if blocks:
+        combined_text = "\n".join(b.text for b in blocks)
+        sm = SCOPE_PATTERN.search(combined_text)
+        if sm:
+            counts = Counter(b.machine for b in blocks)
+            most_count = counts.most_common(1)[0][1]
+            dominance = most_count / max(len(blocks), 1)
+            scope_products = re.findall(
+                r"(MAG\d+[A-Z0-9]+|MAC\d+[A-Z0-9]+|SM\d+_[A-Z]|SM\d+|MG\d+[A-Z]+)",
+                sm.group(1), re.IGNORECASE,
+            )
+            scope_products = list(dict.fromkeys(p.upper() for p in scope_products))
+            if len(scope_products) > 1 and (dominance >= 0.5 or len(blocks) <= 2):
+                all_pages: List[Page] = []
+                seen = set()
+                all_range: List[int] = []
+                for b in blocks:
+                    for p in b.pages:
+                        if p.num not in seen:
+                            seen.add(p.num)
+                            all_pages.append(p)
+                            all_range.append(p.num)
+                blocks = [
+                    Block(machine=p, text=combined_text,
+                          page_range=list(all_range), pages=list(all_pages),
+                          header=f"SCOPE: {p}")
+                    for p in scope_products
+                ]
+                scope_fanned = True
+                logger.info(f"SCOPE fan-out: {scope_products}")
+
     if user_names:
-        user_names_upper = [n.upper() for n in user_names]
-
-        # Keep only blocks whose auto-detected name matches a user-provided name
-        matching = [
-            b for b in blocks
-            if b["machine"].upper() in user_names_upper
-        ]
-
-        # Merge all blocks with the same machine name into one block
-        merged_by_name = {}
-        for block in matching:
-            name = block["machine"].upper()
-            if name not in merged_by_name:
-                merged_by_name[name] = {
-                    "machine": name,
-                    "header": block["header"],
-                    "text": block["text"]
-                }
-            else:
-                merged_by_name[name]["text"] += "\n" + block["text"]
-
-        # Preserve user-input order
-        blocks = [
-            merged_by_name[n] for n in user_names_upper
-            if n in merged_by_name
-        ]
-        logger.info(f"After user-name filter+merge: {[b['machine'] for b in blocks]}")
-
-    # POST-PROCESSING Step 3: SCOPE-based documents (auto-detect only)
-    else:
-        from collections import Counter
-        name_counts = Counter(b["machine"] for b in blocks)
-        most_common_name, most_common_count = name_counts.most_common(1)[0]
-        if len(blocks) > 3 and most_common_count / len(blocks) >= 0.7:
-            combined_text = "\n".join(b["text"] for b in blocks)
-            scope_match = SCOPE_PATTERN.search(combined_text)
-            if scope_match:
-                scope_text = scope_match.group(1)
-                scope_products = re.findall(
-                    r'(MAG\d+[A-Z0-9]+|MAC\d+[A-Z0-9]+|SM\d+_[A-Z]|SM\d+|MG\d+[A-Z]+)',
-                    scope_text, re.IGNORECASE
+        wanted = [n.upper() for n in user_names]
+        kept = [b for b in blocks if b.machine.upper() in wanted]
+        merged_by_name: dict = {}
+        for b in kept:
+            key = b.machine.upper()
+            if key not in merged_by_name:
+                merged_by_name[key] = Block(
+                    machine=key, text=b.text,
+                    page_range=list(b.page_range), pages=list(b.pages),
+                    header=b.header,
                 )
-                scope_products = list(dict.fromkeys(p.upper() for p in scope_products))
-                if len(scope_products) > 1:
-                    blocks = [
-                        {"machine": prod, "header": f"SCOPE: {prod}", "text": combined_text}
-                        for prod in scope_products
-                    ]
-                    return blocks
+            else:
+                m = merged_by_name[key]
+                m.text += "\n" + b.text
+                for p in b.pages:
+                    if p.num not in m.page_range:
+                        m.page_range.append(p.num)
+                        m.pages.append(p)
+        blocks = [merged_by_name[n] for n in wanted if n in merged_by_name]
+        logger.info(f"After user filter: {[b.machine for b in blocks]}")
+    elif not scope_fanned:
+        seen_count: dict = {}
+        for b in blocks:
+            seen_count[b.machine] = seen_count.get(b.machine, 0) + 1
+            if seen_count[b.machine] > 1:
+                b.machine = f"{b.machine}_{seen_count[b.machine]}"
 
-    # POST-PROCESSING Step 4: Deduplicate names (auto-detect only)
-    if user_names is None:
-        machine_counts = {}
-        for block in blocks:
-            machine = block["machine"]
-            machine_counts[machine] = machine_counts.get(machine, 0) + 1
-            if machine_counts[machine] > 1:
-                block["machine"] = f"{machine}_{machine_counts[machine]}"
-    
-    # POST-PROCESSING Step 3: Clean up duplicate names (non-SCOPE documents)
-    machine_counts = {}
-    for block in blocks:
-        machine = block["machine"]
-        machine_counts[machine] = machine_counts.get(machine, 0) + 1
-        if machine_counts[machine] > 1:
-            block["machine"] = f"{machine}_{machine_counts[machine]}"
-    
-    logger.info(f"Segmentation complete: {len(blocks)} blocks found")
-    
+    logger.info(f"Segmentation: {len(blocks)} block(s)")
+    for b in blocks:
+        sample = b.page_range[:5]
+        more = "..." if len(b.page_range) > 5 else ""
+        logger.info(f"  {b.machine:18s} pages={sample}{more}  ({len(b.text):,} chars)")
+
     return blocks
-
-
-def get_block_summary(blocks: List[Dict[str, str]]) -> str:
-    """
-    Create a human-readable summary of all blocks.
-    
-    Useful for debugging and showing user what was found.
-    """
-    summary = f"Found {len(blocks)} blocks:\n"
-    
-    for i, block in enumerate(blocks, 1):
-        text_length = len(block["text"])
-        header = block["header"][:50] + "..." if len(block["header"]) > 50 else block["header"]
-        
-        summary += f"{i}. {block['machine']}: {header} ({text_length:,} chars)\n"
-    
-    return summary

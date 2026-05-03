@@ -1,0 +1,125 @@
+{
+  "extraction_id": "ext_ffeee92f",
+  "original_filename": "test.pdf",
+  "saved_as": "ext_ffeee92f_test.pdf",
+  "num_pages": 62,
+  "num_machines": 5,
+  "machines": [
+    "MAG03D0424",
+    "MAG03D0425",
+    "MAG03D0426",
+    "MAG03D0427",
+    "MAG03D0428"
+  ],
+  "machine_details": [
+    {
+      "machine": "MAG03D0424",
+      "num_test_conditions": 12,
+      "sub_machines": [
+        "THE 40 PIN",
+        "INTO 10 PIN",
+        "MAG03D0424",
+        "M A G03D0425",
+        "MAG03D0426",
+        "MAG03D0427"
+      ],
+      "has_sub_machines": true
+    },
+    {
+      "machine": "MAG03D0425",
+      "num_test_conditions": 12,
+      "sub_machines": [
+        "THE 40 PIN",
+        "INTO 10 PIN",
+        "MAG03D0424",
+        "M A G03D0425",
+        "MAG03D0426",
+        "MAG03D0427"
+      ],
+      "has_sub_machines": true
+    },
+    {
+      "machine": "MAG03D0426",
+      "num_test_conditions": 12,
+      "sub_machines": [
+        "THE 40 PIN",
+        "INTO 10 PIN",
+        "MAG03D0424",
+        "M A G03D0425",
+        "MAG03D0426",
+        "MAG03D0427"
+      ],
+      "has_sub_machines": true
+    },
+    {
+      "machine": "MAG03D0427",
+      "num_test_conditions": 12,
+      "sub_machines": [
+        "THE 40 PIN",
+        "INTO 10 PIN",
+        "MAG03D0424",
+        "M A G03D0425",
+        "MAG03D0426",
+        "MAG03D0427"
+      ],
+      "has_sub_machines": true
+    },
+    {
+      "machine": "MAG03D0428",
+      "num_test_conditions": 12,
+      "sub_machines": [
+        "THE 40 PIN",
+        "INTO 10 PIN",
+        "MAG03D0424",
+        "M A G03D0425",
+        "MAG03D0426",
+        "MAG03D0427"
+      ],
+      "has_sub_machines": true
+    }
+  ],
+  "status": "completed",
+  "extraction_method": "regex",
+  "gemini_called": false,
+  "uploaded_at": "2026-04-29T19:08:28.315993",
+  "processed_at": "2026-04-29T19:08:28.316002",
+  "text_files": [],
+  "excel_files": [
+    "ext_ffeee92f_MAG03D0424.xlsx",
+    "ext_ffeee92f_MAG03D0424_THE_40_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0424_INTO_10_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0424_MAG03D0424.xlsx",
+    "ext_ffeee92f_MAG03D0424_M_A_G03D0425.xlsx",
+    "ext_ffeee92f_MAG03D0424_MAG03D0426.xlsx",
+    "ext_ffeee92f_MAG03D0424_MAG03D0427.xlsx",
+    "ext_ffeee92f_MAG03D0425.xlsx",
+    "ext_ffeee92f_MAG03D0425_THE_40_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0425_INTO_10_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0425_MAG03D0424.xlsx",
+    "ext_ffeee92f_MAG03D0425_M_A_G03D0425.xlsx",
+    "ext_ffeee92f_MAG03D0425_MAG03D0426.xlsx",
+    "ext_ffeee92f_MAG03D0425_MAG03D0427.xlsx",
+    "ext_ffeee92f_MAG03D0426.xlsx",
+    "ext_ffeee92f_MAG03D0426_THE_40_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0426_INTO_10_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0426_MAG03D0424.xlsx",
+    "ext_ffeee92f_MAG03D0426_M_A_G03D0425.xlsx",
+    "ext_ffeee92f_MAG03D0426_MAG03D0426.xlsx",
+    "ext_ffeee92f_MAG03D0426_MAG03D0427.xlsx",
+    "ext_ffeee92f_MAG03D0427.xlsx",
+    "ext_ffeee92f_MAG03D0427_THE_40_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0427_INTO_10_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0427_MAG03D0424.xlsx",
+    "ext_ffeee92f_MAG03D0427_M_A_G03D0425.xlsx",
+    "ext_ffeee92f_MAG03D0427_MAG03D0426.xlsx",
+    "ext_ffeee92f_MAG03D0427_MAG03D0427.xlsx",
+    "ext_ffeee92f_MAG03D0428.xlsx",
+    "ext_ffeee92f_MAG03D0428_THE_40_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0428_INTO_10_PIN.xlsx",
+    "ext_ffeee92f_MAG03D0428_MAG03D0424.xlsx",
+    "ext_ffeee92f_MAG03D0428_M_A_G03D0425.xlsx",
+    "ext_ffeee92f_MAG03D0428_MAG03D0426.xlsx",
+    "ext_ffeee92f_MAG03D0428_MAG03D0427.xlsx"
+  ],
+  "json_files": []
+}

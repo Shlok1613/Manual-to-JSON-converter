@@ -1,0 +1,37 @@
+{
+  "extraction_id": "ext_52f2cd7d",
+  "original_filename": "test.pdf",
+  "saved_as": "ext_52f2cd7d_test.pdf",
+  "num_pages": 20,
+  "num_machines": 1,
+  "machines": [
+    "SPPR"
+  ],
+  "machine_details": [
+    {
+      "machine": "SPPR",
+      "num_test_conditions": 8,
+      "sub_machines": [
+        "TO 357 VAC",
+        "TO 328 VAC",
+        "TO 363",
+        "TO 363 VAC"
+      ],
+      "has_sub_machines": true
+    }
+  ],
+  "status": "completed",
+  "extraction_method": "regex",
+  "gemini_called": false,
+  "uploaded_at": "2026-04-28T11:25:12.374267",
+  "processed_at": "2026-04-28T11:25:12.374282",
+  "text_files": [],
+  "excel_files": [
+    "ext_52f2cd7d_SPPR.xlsx",
+    "ext_52f2cd7d_SPPR_TO_357_VAC.xlsx",
+    "ext_52f2cd7d_SPPR_TO_328_VAC.xlsx",
+    "ext_52f2cd7d_SPPR_TO_363.xlsx",
+    "ext_52f2cd7d_SPPR_TO_363_VAC.xlsx"
+  ],
+  "json_files": []
+}

@@ -1,0 +1,39 @@
+{
+  "extraction_id": "ext_a8ad2be6",
+  "original_filename": "test.pdf",
+  "saved_as": "ext_a8ad2be6_test.pdf",
+  "num_pages": 20,
+  "num_machines": 1,
+  "machines": [
+    "SPPR"
+  ],
+  "machine_details": [
+    {
+      "machine": "SPPR",
+      "num_test_conditions": 86,
+      "sub_machines": [
+        "MGH3BF",
+        "MGH3BY",
+        "MGH3BH",
+        "MG73BR",
+        "MGI3BF"
+      ],
+      "has_sub_machines": true
+    }
+  ],
+  "status": "completed",
+  "extraction_method": "regex",
+  "gemini_called": false,
+  "uploaded_at": "2026-04-30T14:00:54.779266",
+  "processed_at": "2026-04-30T14:00:54.779283",
+  "text_files": [],
+  "excel_files": [
+    "ext_a8ad2be6_SPPR.xlsx",
+    "ext_a8ad2be6_SPPR_MGH3BF.xlsx",
+    "ext_a8ad2be6_SPPR_MGH3BY.xlsx",
+    "ext_a8ad2be6_SPPR_MGH3BH.xlsx",
+    "ext_a8ad2be6_SPPR_MG73BR.xlsx",
+    "ext_a8ad2be6_SPPR_MGI3BF.xlsx"
+  ],
+  "json_files": []
+}

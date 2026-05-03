@@ -129,31 +129,81 @@ async function executeDelete(id, deletePdf = false) {
 }
 
 function addMachineSlot() {
-  const container = document.getElementById('machine-inputs');
-  const wrapper = document.createElement('div');
-  wrapper.className = 'flex gap-2';
-  wrapper.innerHTML = `
+  const container = document.getElementById('machine-slots');
+  const slotId = `machine-slot-${Date.now()}`;
+  const slot = document.createElement('div');
+  slot.id = slotId;
+  slot.className = 'bg-slate-800/40 border border-slate-700/50 rounded-xl p-3 space-y-2';
+  slot.innerHTML = `
+    <div class="flex gap-2">
+      <input type="text"
+             placeholder="Machine name e.g. SPPR"
+             class="machine-name-input flex-1 bg-slate-800/60 border border-slate-600
+                    rounded-xl px-4 py-2.5 text-white placeholder-slate-500 text-sm
+                    focus:outline-none focus:border-cyan-500/60 transition"/>
+      <button onclick="document.getElementById('${slotId}').remove()"
+              class="px-3 rounded-xl bg-slate-700 hover:bg-red-500/20 text-slate-400
+                     hover:text-red-400 border border-slate-600 transition text-sm">
+        ✕
+      </button>
+    </div>
+    <div class="sub-machine-container space-y-2 pl-4 border-l-2 border-slate-700"></div>
+    <button onclick="addSubMachineSlot('${slotId}')"
+            class="w-full py-1.5 rounded-lg border border-dashed border-slate-600
+                   text-slate-500 hover:border-purple-500/50 hover:text-purple-400
+                   text-xs transition flex items-center justify-center gap-1">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none"
+           viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 4v16m8-8H4"/>
+      </svg>
+      Add Sub-Machine
+    </button>
+  `;
+  container.appendChild(slot);
+}
+
+function addSubMachineSlot(slotId) {
+  const container = document.querySelector(`#${slotId} .sub-machine-container`);
+  const subSlot = document.createElement('div');
+  subSlot.className = 'flex gap-2';
+  subSlot.innerHTML = `
     <input type="text"
-           placeholder="e.g. SM500"
-           class="machine-name-input flex-1 bg-slate-800/60 border border-slate-600
-                  rounded-xl px-4 py-2.5 text-white placeholder-slate-500 text-sm
-                  focus:outline-none focus:border-cyan-500/60 transition"/>
+           placeholder="Sub-machine e.g. MG63BF"
+           class="sub-machine-input flex-1 bg-slate-800/60 border border-slate-600
+                  rounded-lg px-3 py-2 text-white placeholder-slate-500 text-sm
+                  focus:outline-none focus:border-purple-500/60 transition"/>
     <button onclick="this.parentElement.remove()"
-            class="px-3 rounded-xl bg-slate-700 hover:bg-red-500/20 text-slate-400
-                   hover:text-red-400 border border-slate-600 transition text-sm">
+            class="px-2 rounded-lg bg-slate-700 hover:bg-red-500/20 text-slate-400
+                   hover:text-red-400 border border-slate-600 transition text-xs">
       ✕
     </button>
   `;
-  container.appendChild(wrapper);
+  container.appendChild(subSlot);
 }
 
 function cancelMachineModal() {
-  const modal = document.getElementById('machine-modal');
-  modal.classList.add('hidden');
-  modal.classList.remove('flex');
+  document.getElementById('machine-modal').classList.add('hidden');
+  document.getElementById('machine-modal').classList.remove('flex');
   const input = document.getElementById('pdfFile');
   if (input) { input.value = ''; }
   if (typeof updateFileName === 'function') updateFileName(input);
+}
+
+function collectMachineData() {
+  const result = {};
+  const slots = document.querySelectorAll('#machine-slots > div');
+  slots.forEach(slot => {
+    const nameInput = slot.querySelector('.machine-name-input');
+    const machineName = nameInput ? nameInput.value.trim().toUpperCase() : '';
+    if (!machineName) return;
+    const subInputs = slot.querySelectorAll('.sub-machine-input');
+    const subNames = Array.from(subInputs)
+      .map(el => el.value.trim().toUpperCase())
+      .filter(n => n.length > 0);
+    result[machineName] = subNames;
+  });
+  return result;
 }
 
 async function uploadFile() {
@@ -162,18 +212,8 @@ async function uploadFile() {
     showToast('Please select a PDF file first.', 'error');
     return;
   }
-
-  // Reset modal slots to one empty input
-  const container = document.getElementById('machine-inputs');
-  container.innerHTML = `
-    <input type="text"
-           placeholder="e.g. SPPR"
-           class="machine-name-input w-full bg-slate-800/60 border border-slate-600
-                  rounded-xl px-4 py-2.5 text-white placeholder-slate-500 text-sm
-                  focus:outline-none focus:border-cyan-500/60 transition"/>
-  `;
-
-  // Show modal
+  document.getElementById('machine-slots').innerHTML = '';
+  addMachineSlot();
   const modal = document.getElementById('machine-modal');
   modal.classList.remove('hidden');
   modal.classList.add('flex');
@@ -187,18 +227,11 @@ async function startExtraction() {
     return;
   }
 
-  // Collect non-empty machine names
-  const rawInputs = document.querySelectorAll('.machine-name-input');
-  const machineNames = Array.from(rawInputs)
-    .map(el => el.value.trim().toUpperCase())
-    .filter(name => name.length > 0);
+  const machineData = collectMachineData();
 
-  // Close modal
-  const modal = document.getElementById('machine-modal');
-  modal.classList.add('hidden');
-  modal.classList.remove('flex');
+  document.getElementById('machine-modal').classList.add('hidden');
+  document.getElementById('machine-modal').classList.remove('flex');
 
-  // --- existing upload logic (identical to original uploadFile body) ---
   const file = input.files[0];
   const loader = document.getElementById("loader");
   const extractBtn = document.getElementById("extract-btn");
@@ -214,7 +247,7 @@ async function startExtraction() {
 
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("machine_names", machineNames.join(','));
+  formData.append("machine_data", JSON.stringify(machineData));
 
   try {
     const response = await fetch(`${API}/api/extract`, {
@@ -274,7 +307,6 @@ async function startExtraction() {
     if (dropZoneDiv) dropZoneDiv.classList.remove("opacity-50", "pointer-events-none");
   }
 }
-
 // Add CSS animation for result card if not present in main css
 const style = document.createElement('style');
 style.textContent = `

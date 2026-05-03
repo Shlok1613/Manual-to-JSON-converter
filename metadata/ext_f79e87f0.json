@@ -1,0 +1,17 @@
+{
+  "extraction_id": "ext_f79e87f0",
+  "original_filename": "test.pdf",
+  "saved_as": "ext_f79e87f0_test.pdf",
+  "num_pages": 20,
+  "num_machines": 0,
+  "machines": [],
+  "machine_details": [],
+  "status": "completed",
+  "extraction_method": "regex",
+  "gemini_called": false,
+  "uploaded_at": "2026-04-28T11:29:25.764545",
+  "processed_at": "2026-04-28T11:29:25.764556",
+  "text_files": [],
+  "excel_files": [],
+  "json_files": []
+}

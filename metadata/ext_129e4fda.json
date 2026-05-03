@@ -1,0 +1,33 @@
+{
+  "extraction_id": "ext_129e4fda",
+  "original_filename": "FUnctional Testing WI_Five series.pdf",
+  "saved_as": "ext_129e4fda_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 1,
+  "machines": [
+    "SM500_A"
+  ],
+  "machine_summary": [
+    {
+      "machine": "SM500_A",
+      "status": "ok",
+      "variants": [
+        "MG63BF",
+        "MG63BH"
+      ]
+    }
+  ],
+  "excel_files": [
+    "ext_129e4fda_SM500_A_MG63BF.xlsx",
+    "ext_129e4fda_SM500_A_MG63BH.xlsx",
+    "ext_129e4fda_SM500_A_summary.xlsx"
+  ],
+  "user_input": {
+    "SM500_A": [
+      "MG63BF",
+      "MG63BH"
+    ]
+  },
+  "status": "completed",
+  "timestamp": "2026-05-01T06:45:40.109923"
+}

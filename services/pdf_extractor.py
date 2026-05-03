@@ -1,138 +1,120 @@
+# services/pdf_extractor.py
 """
-PDF Text Extractor
-Supports both regular PDFs and ZIP-based scanned PDFs with OCR text.
+PDF Page Extractor — returns Page objects with both OCR text and JPEG bytes.
+
+Handles:
+  - ZIP-bundle "PDFs": archive of N.jpeg + N.txt + manifest.json (the project files)
+  - Real text-layer PDFs: pdfplumber for text + pdf2image for rendering
 """
-import pdfplumber
 import zipfile
-from pathlib import Path
-from typing import List
-import logging
+import json
+import io
 import re
+from pathlib import Path
+from typing import List, Optional
+import logging
+
+import pdfplumber
+
+from .types import Page
 
 logger = logging.getLogger(__name__)
 
 
-def is_zip_with_text(pdf_path: Path) -> bool:
-    """
-    Check if file is a ZIP archive containing text files.
-
-    Some scanned PDFs are actually ZIP files with JPEGs + OCR text files.
-    """
+def _is_zip_bundle(pdf_path: Path) -> bool:
     try:
-        with zipfile.ZipFile(pdf_path, 'r') as zf:
-            files = zf.namelist()
-            has_text_files = any(f.endswith('.txt') for f in files)
-
-            if has_text_files:
-                text_count = len([
-                    f for f in files
-                    if f.endswith('.txt') and 'manifest' not in f.lower()
-                ])
-                logger.info(f"Detected ZIP-based PDF with {text_count} text files")
-                return True
-    except (zipfile.BadZipFile, Exception):
-        pass
-
-    return False
+        with open(pdf_path, "rb") as fh:
+            return fh.read(4) == b"PK\x03\x04"
+    except Exception:
+        return False
 
 
-def extract_from_zip_pdf(pdf_path: Path) -> List[str]:
-    """
-    Extract text from ZIP-based PDF (scanned document with OCR).
+def _page_num_from_name(filename: str) -> int:
+    digits = re.findall(r"\d+", filename)
+    return int(digits[0]) if digits else 0
 
-    Format: ZIP archive containing:
-    - X.jpeg: Scanned page images
-    - X.txt: OCR extracted text
-    - manifest.json: Metadata
-    """
-    pages = []
 
-    with zipfile.ZipFile(pdf_path, 'r') as zf:
-        # Get all text files, excluding manifest
-        text_files = [
-            f for f in zf.namelist()
-            if f.endswith('.txt') and 'manifest' not in f.lower()
-        ]
+def _extract_zip_bundle(pdf_path: Path) -> List[Page]:
+    pages: List[Page] = []
+    with zipfile.ZipFile(pdf_path, "r") as zf:
+        files = zf.namelist()
 
-        # Sort by page number (extract number from filename)
-        def get_page_num(filename):
+        manifest = {}
+        for f in files:
+            if "manifest" in f.lower() and f.endswith(".json"):
+                try:
+                    manifest = json.loads(zf.read(f).decode("utf-8", errors="ignore"))
+                except Exception as e:
+                    logger.warning(f"manifest parse failed: {e}")
+                break
+        manifest_pages = {p["page_number"]: p for p in manifest.get("pages", [])}
+
+        text_files = sorted(
+            [f for f in files if f.endswith(".txt") and "manifest" not in f.lower()],
+            key=_page_num_from_name,
+        )
+        logger.info(f"ZIP bundle: {len(text_files)} pages")
+
+        for tf in text_files:
+            n = _page_num_from_name(tf)
             try:
-                numbers = re.findall(r'\d+', filename)
-                return int(numbers[0]) if numbers else 0
+                ocr_text = zf.read(tf).decode("utf-8", errors="ignore")
             except Exception:
-                return 0
+                ocr_text = ""
 
-        text_files = sorted(text_files, key=get_page_num)
+            jpeg_name = f"{n}.jpeg"
+            jpeg_bytes = zf.read(jpeg_name) if jpeg_name in files else None
 
-        logger.info(f"Extracting {len(text_files)} pages from ZIP-based PDF")
+            mp = manifest_pages.get(n, {})
+            dims = mp.get("image", {}).get("dimensions", {}) if mp else {}
 
-        for txt_file in text_files:
-            try:
-                text_content = zf.read(txt_file).decode('utf-8', errors='ignore')
-                pages.append(text_content)
-            except Exception as e:
-                logger.warning(f"Failed to read {txt_file}: {e}")
-                pages.append("")
-
+            pages.append(Page(
+                num=n,
+                ocr_text=ocr_text,
+                jpeg_bytes=jpeg_bytes,
+                width=dims.get("width", 0),
+                height=dims.get("height", 0),
+            ))
     return pages
 
 
-def extract_text(pdf_path: Path) -> List[str]:
-    """
-    Extract text from PDF file.
+def _extract_real_pdf(pdf_path: Path) -> List[Page]:
+    pages: List[Page] = []
+    text_per_page: List[str] = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for p in pdf.pages:
+            text_per_page.append(p.extract_text() or "")
+        page_count = len(pdf.pages)
 
-    Supports:
-    - Regular text-based PDFs (pdfplumber)
-    - ZIP-based scanned PDFs with OCR text
-
-    Args:
-        pdf_path: Path to PDF file (or ZIP file with .pdf extension)
-
-    Returns:
-        List of strings, one per page
-    """
-    logger.info(f"Extracting text from: {pdf_path.name}")
-
-    # Check if it's a ZIP-based PDF (NEW!)
-    if is_zip_with_text(pdf_path):
-        logger.info("Processing as ZIP-based scanned PDF")
-        return extract_from_zip_pdf(pdf_path)
-
-    # Process as regular PDF (EXISTING)
+    images_per_page: List[Optional[bytes]] = [None] * page_count
     try:
-        logger.info("Processing as regular PDF with pdfplumber")
-        with pdfplumber.open(pdf_path) as pdf:
-            pages = []
-            for i, page in enumerate(pdf.pages, 1):
-                text = page.extract_text()
-                if text:
-                    pages.append(text)
-                else:
-                    logger.warning(f"Page {i} returned no text")
-                    pages.append("")
-
-            logger.info(f"Extracted {len(pages)} pages")
-            return pages
-
+        from pdf2image import convert_from_path
+        pil_images = convert_from_path(str(pdf_path), dpi=150)
+        for i, img in enumerate(pil_images):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            images_per_page[i] = buf.getvalue()
+    except ImportError:
+        logger.warning("pdf2image not installed — vision will be unavailable for real PDFs")
     except Exception as e:
-        logger.error(f"pdfplumber failed: {e}")
+        logger.warning(f"pdf2image render failed: {e}")
 
-        # Try PyMuPDF fallback if available
-        try:
-            import fitz
-            logger.info("Trying PyMuPDF fallback")
+    for i in range(page_count):
+        pages.append(Page(num=i + 1, ocr_text=text_per_page[i], jpeg_bytes=images_per_page[i]))
+    return pages
 
-            doc = fitz.open(pdf_path)
-            pages = []
 
-            for page in doc:
-                text = page.get_text()
-                pages.append(text if text else "")
+def extract_pages(pdf_path: Path) -> List[Page]:
+    """Public: returns ordered list of Page objects with text + jpeg."""
+    logger.info(f"Extracting: {pdf_path.name}")
+    if _is_zip_bundle(pdf_path):
+        logger.info("  format: ZIP bundle")
+        return _extract_zip_bundle(pdf_path)
+    logger.info("  format: real PDF")
+    return _extract_real_pdf(pdf_path)
 
-            doc.close()
-            logger.info(f"Extracted {len(pages)} pages with PyMuPDF")
-            return pages
 
-        except Exception as e2:
-            logger.error(f"PyMuPDF also failed: {e2}")
-            raise Exception(f"Could not extract text from PDF: {e}")
+def extract_text(pdf_path: Path) -> List[str]:
+    """Backward-compatible: returns just per-page text strings."""
+    return [p.ocr_text for p in extract_pages(pdf_path)]
+

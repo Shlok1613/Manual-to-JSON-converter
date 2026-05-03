@@ -1,639 +1,392 @@
+# main.py
 """
-FastAPI main application with unique extraction IDs.
+GIC Smart Manufacturing Extraction Engine — Backend (Vision-First v3).
+
+Pipeline:
+  1. extract_pages       (PDF/ZIP -> Page[] with text + jpeg)
+  2. segment_blocks      (Page[] -> Block[] with page_range)
+  3. extract_machine_data (vision: specs + procedure -> VariantData)
+  4. validate_variants   (deterministic rules, flag bad data)
+  5. write_*_workbook    (template-matching xlsx)
 """
 from pathlib import Path
 from datetime import datetime
-from fastapi import FastAPI, File, Form, Request, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
 import logging
 import json
-from fastapi.staticfiles import StaticFiles
+import os
+from services.types import Specs
 
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
+
 load_dotenv()
 
+from database import engine, SessionLocal
+from models.db_models import Base, ExtractionDB
 from models.schemas import ExtractionResult, generate_extraction_id
 
-from database import engine
-from models.db_models import Base
-from database import SessionLocal
-from models.db_models import ExtractionDB
+from services.types import Block
+from services.pdf_extractor import extract_pages
+from services.block_segmenter import segment_blocks
+from services.vision_extractor import extract_machine_data, extraction_was_successful
+from services.validator import validate_variants
+from services.template_writer import write_variant_workbook, write_consolidated_workbook
+from services.enricher import enrich_variant
+from services.normalizer import normalize_variant
+from services.table_extractor import detect_variants_from_text
+from services.variant_page_mapper import filter_pages_for_variant
 
 Base.metadata.create_all(bind=engine)
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
-app = FastAPI(
-    title="PDF to Excel/JSON Converter",
-    description="Extracts manufacturing test procedures from PDFs with unique tracking IDs",
-    version="1.0.0"
-)
+app = FastAPI(title="GIC Extraction Engine", version="3.0.0")
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Define directories
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
-METADATA_DIR = BASE_DIR / "metadata"  # NEW: Store extraction metadata
+METADATA_DIR = BASE_DIR / "metadata"
+STATIC_DIR = BASE_DIR / "static"
 
-# Create directories
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+for d in (UPLOAD_DIR, OUTPUT_DIR, METADATA_DIR):
+    d.mkdir(parents=True, exist_ok=True)
 
-logger.info(f"Upload directory: {UPLOAD_DIR}")
-logger.info(f"Output directory: {OUTPUT_DIR}")
-METADATA_DIR.mkdir(exist_ok=True)
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+def _save_metadata(extraction_id: str, payload: dict) -> None:
+    path = METADATA_DIR / f"{extraction_id}.json"
+    path.write_text(json.dumps(payload, indent=2, default=str))
+
+
+def _persist_extraction(extraction_id: str, payload: dict) -> None:
+    try:
+        with SessionLocal() as db:
+            row = ExtractionDB(
+                extraction_id=extraction_id,
+                filename=payload.get("original_filename", ""),
+                num_pages=payload.get("num_pages", 0),
+                num_machines=payload.get("num_machines", 0),
+                machines=json.dumps(payload.get("machines", [])),
+                excel_files=json.dumps(payload.get("excel_files", [])),
+                status=payload.get("status", "completed"),
+                created_at=datetime.utcnow(),
+            )
+            db.add(row)
+            db.commit()
+    except Exception as e:
+        logger.warning(f"DB persist failed (non-fatal): {e}")
 
 
 @app.post("/api/extract", response_model=ExtractionResult)
 async def extract_pdf(
-        file: UploadFile = File(...),
-        machine_names: str = Form(default="")
-    ):
-    """
-    Main extraction endpoint with unique ID generation.
-    
-    Complete process:
-    1. Generate unique extraction ID
-    2. Save uploaded PDF
-    3. Extract text from PDF
-    4. Segment into machine blocks
-    5. Save text files (extracted + summary)
-    6. Save metadata
-    7. Return result with unique ID
-    """
-    
-    # STEP 1: Generate unique ID
+    file: UploadFile = File(...),
+    machine_data: str = Form(default="{}"),
+):
     extraction_id = generate_extraction_id()
-    logger.info(f"New extraction: {extraction_id} - {file.filename}")
-    extraction_method = "regex"  # tracks which path was taken
-    
-    # STEP 2: Validate file
+    logger.info(f"=== New extraction: {extraction_id} - {file.filename} ===")
+
     if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF files are supported"
-        )
-    
-    # STEP 3: Save PDF with unique ID
-    safe_filename = file.filename.replace(" ", "_")
-    pdf_filename = f"{extraction_id}_{safe_filename}"
-    pdf_path = UPLOAD_DIR / pdf_filename
-    
+        raise HTTPException(400, "Only .pdf files supported")
+
+    safe = file.filename.replace(" ", "_")
+    pdf_path = UPLOAD_DIR / f"{extraction_id}_{safe}"
+    content = await file.read()
+    pdf_path.write_bytes(content)
+    logger.info(f"Saved upload: {pdf_path.name} ({len(content):,} bytes)")
+
     try:
-        content = await file.read()
-        pdf_path.write_bytes(content)
-        logger.info(f"Saved PDF: {pdf_path.name}")
-    except Exception as e:
-        logger.error(f"Failed to save PDF: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save file: {str(e)}"
-        )
-    
-    # STEP 4: Extract text from PDF
+        raw = json.loads(machine_data) if machine_data else {}
+    except json.JSONDecodeError:
+        raise HTTPException(400, "machine_data must be valid JSON (use double quotes)")
+    machine_dict = {
+        k.strip().upper(): [s.strip().upper() for s in (v or []) if s and s.strip()]
+        for k, v in raw.items()
+        if k and k.strip()
+    }
+    user_names = list(machine_dict.keys())
+    logger.info(f"User-specified: {machine_dict}")
+
+    # 1. extract pages
     try:
-        from services.pdf_extractor import extract_text
-        
-        pages = extract_text(pdf_path)
-        num_pages = len(pages)
-        
-        logger.info(f"Extracted {num_pages} pages from {extraction_id}")
-        
+        pages = extract_pages(pdf_path)
+        jpeg_count = sum(1 for p in pages if p.jpeg_bytes)
+        logger.info(f"JPEG COUNT: {jpeg_count}")
     except Exception as e:
-        logger.error(f"Extraction failed for {extraction_id}: {e}")
-        
-        # Save error metadata
-        error_metadata = {
-            "extraction_id": extraction_id,
-            "filename": file.filename,
-            "status": "failed",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        metadata_path = METADATA_DIR / f"{extraction_id}_error.json"
-        metadata_path.write_text(json.dumps(error_metadata, indent=2))
-        
-        raise HTTPException(
-            status_code=500,
-            detail=f"Extraction failed: {str(e)}"
-        )
-    
-    # STEP 5: Segment into machine blocks (NEW!)
+        logger.info(f"Page extraction failed: {e}")
+        _save_metadata(extraction_id, {
+            "extraction_id": extraction_id, "status": "failed",
+            "error": f"Page extraction failed: {e}",
+        })
+        raise HTTPException(500, f"Page extraction failed: {e}")
+
+    num_pages = len(pages)
+    pages_with_jpeg = sum(1 for p in pages if p.jpeg_bytes)
+    logger.info(f"Pages: {num_pages} total, {pages_with_jpeg} with jpeg")
+
+    # 2. segment blocks
     try:
-        from services.block_segmenter import segment_blocks, get_block_summary
-        
-        # Combine all pages
-        full_text = "\n\n".join(pages)
-        
-        # Segment into machine blocks
-        user_names = [n.strip() for n in machine_names.split(',') if n.strip()]
-        blocks = segment_blocks(full_text, user_names=user_names if user_names else None)
-        num_machines = len(blocks)
-        
-        # Create summary
-        summary = get_block_summary(blocks)
-        
-        logger.info(f"Found {num_machines} machine blocks in {extraction_id}")
-        
+        blocks = segment_blocks(pages, user_names=user_names if user_names else None)
     except Exception as e:
-        logger.error(f"Segmentation failed for {extraction_id}: {e}")
-        # Don't fail the whole extraction if segmentation fails
-        blocks = []
-        num_machines = 0
-        summary = f"Segmentation failed: {str(e)}"
+        logger.info(f"Block segmentation failed: {e}")
+        blocks = [Block(
+            machine="UNKNOWN",
+            text="\n\n".join(p.ocr_text for p in pages),
+            page_range=[p.num for p in pages], pages=pages,
+        )]
 
-    
-    # STEP 5.5: Generate test conditions per machine block
-    processed_blocks = []
-    try:
-        from services.universal_spec_extractor import extract_specs, extract_and_generate
-
-        for block in blocks:
-            spec = extract_specs(block["text"])
-            test_conditions = extract_and_generate(block["text"])
-            block["spec_data"] = spec
-            block["test_conditions"] = test_conditions
-            block["num_test_conditions"] = len(test_conditions)
-            processed_blocks.append(block)
-        logger.info(f"{block['machine']}: {len(test_conditions)} conditions")
-
-    except Exception as e:
-        logger.error(f"Condition generation failed: {e}")
-        import traceback
-        traceback.print_exc()
-        processed_blocks = blocks
-
-    print("TOTAL BLOCKS:", len(processed_blocks))
-
-    # STEP 5.7: Gemini quality fallback
-    # Only fires when extraction quality is poor — not on empty/fake input
-    try:
-        from services.gemini_fallback import extraction_quality_poor, call_gemini
-        from services.universal_spec_extractor import generate_conditions
-
-        if extraction_quality_poor(processed_blocks):
-            logger.info("Poor extraction quality — invoking Gemini fallback")
-            extraction_method = "gemini_fallback"
-
-            gemini_blocks = call_gemini(full_text, user_names if user_names else None)
-
-            if gemini_blocks:
-                # Generate conditions from Gemini-provided spec_data
-                processed_blocks = []
-                for block in gemini_blocks:
-                    spec = block["spec_data"]
-                    test_conditions = generate_conditions(spec)
-                    block["test_conditions"] = test_conditions
-                    block["num_test_conditions"] = len(test_conditions)
-                    processed_blocks.append(block)
-                    logger.info(f"Gemini block {block['machine']}: {len(test_conditions)} conditions")
-            else:
-                logger.warning("Gemini returned no blocks — keeping regex output")
-                extraction_method = "regex"
-
-    except Exception as e:
-        logger.error(f"Gemini fallback failed: {e}")
-        import traceback
-        traceback.print_exc()
-        extraction_method = "regex"
-    
-    # STEP 6: Text files DISABLED (not needed - only Excel outputs)
-    text_files = []
-
-    # STEP 6.5: Generate Excel files with specs AND test conditions
     excel_files = []
-    try:
-        from services.excel_writer import generate_excel
-        
-        print("STARTING EXCEL GENERATION")
+    machine_summary = []
 
-        for block in processed_blocks:
-            print("PROCESSING MACHINE:", block["machine"])
+    # 3-5. extract per block, validate, write Excel
+    for block in blocks:
+        machine_name = block.machine
+        sub_machines = machine_dict.get(machine_name, [])
 
-            filename = generate_excel(
-                extraction_id,
-                block["machine"],
-                block.get("spec_data", {}),     # ← was block.get("specifications", {})
-                OUTPUT_DIR,
-                test_conditions=block.get("test_conditions", [])
+        # ✅ If user did NOT provide variants → auto detect
+        if not sub_machines:
+            detected = detect_variants_from_text(block.text)
+
+            detected = [d for d in detected if d != machine_name]
+
+            if detected:
+                logger.info(f"{machine_name}: auto-detected variants → {detected}")
+                sub_machines = detected
+
+        logger.info(f"\n--- {machine_name} (variants: {sub_machines or 'NONE'}) ---")
+
+        if sub_machines:
+            valid_names = [
+                v for v in sub_machines
+                if v in block.text.upper()
+            ]
+
+            if not valid_names:
+                logger.warning(f"{machine_name}: all user variants invalid → skipping")
+                continue
+
+            removed = set(sub_machines) - set(valid_names)
+            if removed:
+                logger.warning(f"{machine_name}: removed invalid variants → {list(removed)}")
+
+            sub_machines = valid_names
+                
+        try:
+            if sub_machines:
+                variants = {}
+
+                for variant in sub_machines:
+                    filtered_pages = filter_pages_for_variant(variant, block.pages)
+
+                    if len(filtered_pages) < 3:
+                        logger.warning(f"{machine_name}/{variant}: too few pages after filter → using full block")
+                        filtered_pages = block.pages
+
+                    sub_block = Block(
+                        machine=block.machine,
+                        text="\n\n".join(p.ocr_text for p in filtered_pages),
+                        page_range=[p.num for p in filtered_pages],
+                        pages=filtered_pages,
+                    )
+
+                    try:
+                        result = extract_machine_data(
+                            block=sub_block,
+                            sub_machines=[variant],
+                        )
+                        variants.update(result)
+                    except Exception as e:
+                        logger.info(f"{machine_name}/{variant}: extraction failed: {e}")
+
+            else:
+                variants = extract_machine_data(
+                    block=block,
+                    sub_machines=None,
+                )
+        except Exception as e:
+            logger.info(f"{machine_name}: vision extraction crashed: {e}")
+            variants = {}
+
+        if not variants:
+            logger.warning(f"{machine_name}: extraction failed — skipping")
+            continue
+
+        # Enrich BEFORE validation
+        for vname, vdata in variants.items():
+            vdata = enrich_variant(vdata, block.text)
+            vdata = normalize_variant(vdata)
+            variants[vname] = vdata
+
+        # Then validate
+        variants = validate_variants(variants)
+
+        FATAL_KEYWORDS = ["physically invalid", "UV max", "LV cutoff"]
+
+        def _is_fatal(flags):
+            return any(any(k in f for k in FATAL_KEYWORDS) for f in flags)
+
+        usable = {
+            n: vd for n, vd in variants.items()
+            if extraction_was_successful(vd) and not _is_fatal(vd.specs.flags)
+        }
+
+        if not usable:
+            logger.warning(f"{machine_name}: no variant produced usable data")
+            machine_summary.append({
+                "machine": machine_name, "status": "no_usable_data",
+                "variants": list(variants.keys()),
+            })
+            continue
+
+        # 1. Always write individual variant files
+        for vname, vdata in usable.items():
+            try:
+                fname = write_variant_workbook(
+                    extraction_id=extraction_id,
+                    parent_machine=machine_name,
+                    variant=vdata,
+                    output_dir=OUTPUT_DIR,
+                )
+                excel_files.append(fname)
+            except Exception as e:
+                logger.info(f"{machine_name}/{vname}: Excel write failed: {e}")
+
+        # 2. ALWAYS write consolidated machine file (even if single variant)
+        try:
+            fname = write_consolidated_workbook(
+                extraction_id=extraction_id,
+                parent_machine=machine_name,
+                variants=usable,
+                output_dir=OUTPUT_DIR,
             )
-            #print("SAVING FILE TO:", OUTPUT_DIR / filename)
-            excel_files.append(filename)
-            logger.info(f"Generated Excel: {filename}")
-        
-    except Exception as e:
-        logger.error(f"Excel generation failed: {e}")
-        import traceback
-        traceback.print_exc()
-        # Don't fail the whole request if Excel generation fails
-    
-# STEP 7: Save extraction metadata (UPDATED!)
+            excel_files.append(fname)
+        except Exception as e:
+            logger.info(f"{machine_name}: consolidated Excel failed: {e}")
+
+        machine_summary.append({
+            "machine": machine_name,
+            "status": "ok",
+            "variants": list(usable.keys()),
+            "flags": {
+                vname: {
+                    "spec_flags": vd.specs.flags,
+                    "step_flag_count": sum(1 for s in vd.test_steps if s.flags),
+                }
+                for vname, vd in usable.items()
+            },
+        })
+
     metadata = {
         "extraction_id": extraction_id,
         "original_filename": file.filename,
-        "saved_as": pdf_filename,
+        "saved_as": pdf_path.name,
         "num_pages": num_pages,
-        "num_machines": num_machines,
-        "machines": [block["machine"] for block in processed_blocks],
-        "machine_details": [
-            {
-                "machine": block["machine"],
-                "num_test_conditions": block.get("num_test_conditions", 0),
-            }
-            for block in processed_blocks
-        ],
-        "status": "completed",
-        "extraction_method": extraction_method,
-        "gemini_called": extraction_method == "gemini_fallback",
-        "uploaded_at": datetime.utcnow().isoformat(),
-        "processed_at": datetime.utcnow().isoformat(),
-        "text_files": text_files,
-        "excel_files": excel_files,  # Will populate next
-        "json_files": []    # Will populate next
+        "num_machines": len(blocks),
+        "machines": [b.machine for b in blocks],
+        "machine_summary": machine_summary,
+        "excel_files": excel_files,
+        "user_input": machine_dict,
+        "status": "completed" if excel_files else "no_output",
+        "timestamp": datetime.utcnow().isoformat(),
     }
-    
-    metadata_path = METADATA_DIR / f"{extraction_id}.json"
-    metadata_path.write_text(json.dumps(metadata, indent=2))
-    logger.info(f"Saved metadata: {metadata_path.name}")
+    _save_metadata(extraction_id, metadata)
+    _persist_extraction(extraction_id, metadata)
 
-    # STEP 7.5: Save to database
-    from database import SessionLocal
-    from models.db_models import ExtractionDB
-
-    db = SessionLocal()
-
-    db_entry = ExtractionDB(
+    return ExtractionResult(
         extraction_id=extraction_id,
         filename=file.filename,
         num_pages=num_pages,
-        num_machines=num_machines,
-        status="completed",
-        uploaded_at=datetime.utcnow().isoformat()
+        num_machines=len(blocks),
+        machines=[b.machine for b in blocks],
+        excel_files=excel_files,
+        status=metadata["status"],
     )
-
-    db.add(db_entry)
-    db.commit()
-    db.close()
-    
-    # STEP 8: Return result (UPDATED!)
-    result = ExtractionResult(
-        extraction_id=extraction_id,
-        filename=file.filename,
-        num_pages=num_pages,
-        num_machines=num_machines,
-        status="completed",
-        created_at=datetime.utcnow(),
-        excel_files=excel_files,  # NOW FILLED!
-        json_files=[],   # Will populate in Week 3
-        download_url=f"/api/download/{extraction_id}"
-    )
-    
-    return result
-
-
-@app.get("/api/extraction/{extraction_id}")
-def get_extraction_info(extraction_id: str):
-    """
-    Get information about a specific extraction.
-    
-    URL: /api/extraction/ext_a3f2b9c1
-    
-    Returns metadata about the extraction.
-    """
-    metadata_path = METADATA_DIR / f"{extraction_id}.json"
-    
-    if not metadata_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Extraction {extraction_id} not found"
-        )
-    
-    metadata = json.loads(metadata_path.read_text())
-    return metadata
-
-
-@app.get("/api/download/{extraction_id}/{filename}")
-def download_file(extraction_id: str, filename: str):
-    """
-    Download a specific file from an extraction.
-    
-    URL: /api/download/ext_a3f2b9c1/ext_a3f2b9c1_SPPR.xlsx
-    
-    Returns the file for download.
-    """
-    file_path = OUTPUT_DIR / filename
-    
-    # Verify the file belongs to this extraction
-    if not filename.startswith(extraction_id):
-        raise HTTPException(
-            status_code=403,
-            detail="File does not belong to this extraction"
-        )
-    
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"File {filename} not found"
-        )
-    
-    return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type="application/octet-stream"
-    )
-
-@app.get("/api/files/{extraction_id}")
-def list_extraction_files(extraction_id: str):
-    """
-    List all files for a specific extraction.
-    
-    URL: /api/files/ext_a3f2b9c1
-    
-    Returns list of files you can download.
-    """
-    # Check extraction exists
-    metadata_path = METADATA_DIR / f"{extraction_id}.json"
-    if not metadata_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Extraction {extraction_id} not found"
-        )
-    
-    # Get metadata
-    metadata = json.loads(metadata_path.read_text())
-    
-    # Find all files for this extraction
-    files = []
-    for file_path in OUTPUT_DIR.glob(f"{extraction_id}_*"):
-        if file_path.is_file():
-            files.append({
-                "filename": file_path.name,
-                "size_bytes": file_path.stat().st_size,
-                "download_url": f"/api/download/{extraction_id}/{file_path.name}"
-            })
-    
-    return {
-        "extraction_id": extraction_id,
-        "total_files": len(files),
-        "files": files,
-        "metadata": metadata
-    }
 
 
 @app.get("/api/extractions")
-def list_extractions(limit: int = 50):
-    """
-    List all extractions.
+async def list_extractions():
+    items = []
+    for path in METADATA_DIR.glob("ext_*.json"):
+        try:
+            data = json.loads(path.read_text())
+            items.append(data)
+        except Exception as e:
+            logger.warning(f"Failed to read {path.name}: {e}")
+    items.sort(key=lambda d: d.get("timestamp", ""), reverse=True)
+    return JSONResponse(items)
 
-    URL: /api/extractions?limit=50
 
-    Returns list of extraction metadata. Filters out ghost DB entries
-    (rows whose metadata JSON file no longer exists on disk).
-    """
-    from database import SessionLocal
-    from models.db_models import ExtractionDB
+@app.get("/api/extraction/{extraction_id}")
+async def get_extraction(extraction_id: str):
+    path = METADATA_DIR / f"{extraction_id}.json"
+    if not path.exists():
+        raise HTTPException(404, f"Extraction {extraction_id} not found")
+    return JSONResponse(json.loads(path.read_text()))
 
-    db = SessionLocal()
-    data = db.query(ExtractionDB).order_by(ExtractionDB.uploaded_at.desc()).all()
-    db.close()
-
-    extractions = []
-    for e in data:
-        meta_path = METADATA_DIR / f"{e.extraction_id}.json"
-        if not meta_path.exists():
-            # Ghost DB entry — metadata file missing; skip it
-            logger.warning(f"Ghost DB entry detected (no metadata): {e.extraction_id}")
-            continue
-        extractions.append({
-            "extraction_id": e.extraction_id,
-            "original_filename": e.filename,
-            "num_machines": e.num_machines,
-            "uploaded_at": e.uploaded_at,
-            "status": e.status
-        })
-
-    return {
-        "total": len(extractions),
-        "extractions": extractions
-    }
-    
-# extractions = []
-#     for meta_file in metadata_files[:limit]:
-#         if "_error" in meta_file.name:
-#             continue  # Skip error files
-        
-#         try:
-#             metadata = json.loads(meta_file.read_text())
-#             extractions.append(metadata)
-#         except Exception as e:
-#             logger.warning(f"Failed to read {meta_file.name}: {e}")
-    
-#     return {
-#         "total": len(extractions),
-#         "extractions": extractions
-#     }
 
 @app.delete("/api/extraction/{extraction_id}")
-def delete_extraction(extraction_id: str, delete_pdf: bool = False):
-    """
-    Delete an extraction.
-
-    If delete_pdf=false (default – "Delete Results Only"):
-      - Deletes Excel output files from outputs/
-      - KEEPS metadata JSON, DB entry, and original PDF
-
-    If delete_pdf=true ("Delete Results & PDF"):
-      - Deletes Excel output files
-      - Deletes metadata JSON
-      - Deletes DB entry
-      - Deletes original uploaded PDF
-    """
-
-    extraction_id = extraction_id.strip()
-    metadata_path = METADATA_DIR / f"{extraction_id}.json"
-
-    if not metadata_path.exists():
-        # Metadata gone — only clean up DB if this is a full delete
-        if delete_pdf:
-            db = SessionLocal()
-            entry = db.query(ExtractionDB).filter(
-                ExtractionDB.extraction_id == extraction_id
-            ).first()
-            if entry:
-                db.delete(entry)
-                db.commit()
-            db.close()
-        return {
-            "status": "already_deleted",
-            "message": "Metadata not found",
-            "results_deleted": True,
-            "pdf_deleted": delete_pdf
-        }
-
-    deleted_files = []
-    errors = []
-
+async def delete_extraction(extraction_id: str, delete_pdf: bool = False):
+    deleted = []
+    md = METADATA_DIR / f"{extraction_id}.json"
+    if md.exists():
+        md.unlink(); deleted.append(md.name)
+    for f in OUTPUT_DIR.glob(f"{extraction_id}_*"):
+        f.unlink(); deleted.append(f.name)
+    if delete_pdf:
+        for f in UPLOAD_DIR.glob(f"{extraction_id}_*"):
+            f.unlink(); deleted.append(f.name)
     try:
-        # ── Step 1: Always delete output (Excel) files ──────────────────────
-        for file_path in OUTPUT_DIR.glob(f"{extraction_id}_*"):
-            try:
-                file_path.unlink()
-                deleted_files.append(file_path.name)
-                logger.info(f"Deleted output file: {file_path.name}")
-            except Exception as e:
-                errors.append(f"Failed to delete {file_path.name}: {str(e)}")
-
-        if delete_pdf:
-            # ── Step 2 (full delete): remove metadata JSON ──────────────────
-            try:
-                metadata_path.unlink()
-                deleted_files.append(metadata_path.name)
-                logger.info(f"Deleted metadata: {metadata_path.name}")
-            except Exception as e:
-                errors.append(f"Failed to delete metadata: {str(e)}")
-
-            # ── Step 3 (full delete): remove original PDF ───────────────────
-            for pdf_path in UPLOAD_DIR.glob(f"{extraction_id}_*"):
-                try:
-                    pdf_path.unlink()
-                    deleted_files.append(pdf_path.name)
-                    logger.info(f"Deleted PDF: {pdf_path.name}")
-                except Exception as e:
-                    errors.append(f"Failed to delete PDF: {str(e)}")
-
-            # ── Step 4 (full delete): remove DB entry ───────────────────────
-            db = SessionLocal()
-            entry = db.query(ExtractionDB).filter(
-                ExtractionDB.extraction_id == extraction_id
-            ).first()
-            if entry:
-                db.delete(entry)
-                db.commit()
-            db.close()
-        else:
-            logger.info(
-                f"Results-only delete for {extraction_id}: "
-                "metadata, DB entry, and PDF are preserved."
-            )
-
-        return {
-            "extraction_id": extraction_id,
-            "status": "deleted",
-            "results_deleted": True,
-            "pdf_deleted": delete_pdf,
-            "deleted_files": deleted_files,
-            "deleted_count": len(deleted_files),
-            "errors": errors if errors else None
-        }
-
+        with SessionLocal() as db:
+            row = db.query(ExtractionDB).filter_by(extraction_id=extraction_id).first()
+            if row:
+                db.delete(row); db.commit()
     except Exception as e:
-        logger.error(f"Delete extraction failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete extraction: {str(e)}"
-        )
+        logger.warning(f"DB delete failed (non-fatal): {e}")
+    if not deleted:
+        raise HTTPException(404, f"Nothing to delete for {extraction_id}")
+    return {"deleted": deleted, "extraction_id": extraction_id}
 
 
-@app.api_route("/api/pdf/{extraction_id}", methods=["GET", "HEAD"])
-def download_pdf(extraction_id: str, request: Request):
-    """
-    Download or check the original uploaded PDF for an extraction.
-
-    GET  /api/pdf/ext_a3f2b9c1  → returns the PDF file for download
-    HEAD /api/pdf/ext_a3f2b9c1  → returns 200 if PDF exists, 404 if not
-                                   (used by frontend to check availability)
-    """
-    matches = list(UPLOAD_DIR.glob(f"{extraction_id}_*"))
-    pdf_matches = [p for p in matches if p.suffix.lower() == ".pdf"]
-
-    if not pdf_matches:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Original PDF for {extraction_id} not found. It may have been deleted."
-        )
-
-    pdf_path = pdf_matches[0]
-
-    # HEAD request: confirm existence only, no body
-    if request.method == "HEAD":
-        from fastapi.responses import Response
-        return Response(
-            status_code=200,
-            headers={"Content-Type": "application/pdf"}
-        )
-
-    # GET request: serve the file
+@app.get("/api/download/{extraction_id}/{filename}")
+async def download_excel(extraction_id: str, filename: str):
+    if not filename.startswith(extraction_id):
+        raise HTTPException(403, "Filename must belong to extraction id")
+    path = OUTPUT_DIR / filename
+    if not path.exists():
+        raise HTTPException(404, f"File not found: {filename}")
     return FileResponse(
-        path=pdf_path,
-        filename=pdf_path.name,
-        media_type="application/pdf"
+        path=str(path), filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
-@app.delete("/api/extraction/{extraction_id}/file/{filename}")
-def delete_single_file(extraction_id: str, filename: str):
-    """
-    Delete a single Excel file from an extraction.
-    
-    Useful for removing specific machine Excel files without deleting entire extraction.
-    
-    Args:
-        extraction_id: Extraction ID
-        filename: Filename to delete (e.g., ext_abc12345_SPPR.xlsx)
-    
-    Usage:
-        DELETE /api/extraction/ext_abc12345/file/ext_abc12345_SPPR.xlsx
-    """
-    
-    # Verify file belongs to this extraction
-    if not filename.startswith(extraction_id):
-        raise HTTPException(
-            status_code=403,
-            detail="File does not belong to this extraction"
-        )
-    
-    file_path = OUTPUT_DIR / filename
-    
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"File {filename} not found"
-        )
-    
-    try:
-        file_path.unlink()
-        logger.info(f"Deleted file: {filename}")
-        
-        return {
-            "extraction_id": extraction_id,
-            "filename": filename,
-            "status": "deleted"
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to delete file {filename}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete file: {str(e)}"
-        )
+@app.get("/")
+async def root():
+    index = STATIC_DIR / "index.html"
+    if index.exists():
+        return FileResponse(str(index))
+    return {"service": "GIC Extraction Engine", "version": "3.0.0", "status": "running"}
+
+
+@app.get("/extraction.html")
+async def extraction_page():
+    page = STATIC_DIR / "extraction.html"
+    if page.exists():
+        return FileResponse(str(page))
+    raise HTTPException(404)
 
 
 @app.get("/health")
-def health_check():
-    """Detailed health check."""
+async def health():
     return {
-        "status": "healthy",
-        "upload_dir_exists": UPLOAD_DIR.exists(),
-        "output_dir_exists": OUTPUT_DIR.exists(),
-        "metadata_dir_exists": METADATA_DIR.exists(),
-        "total_extractions": len(list(METADATA_DIR.glob("ext_*.json")))
+        "status": "ok",
+        "gemini_configured": bool(os.getenv("GEMINI_API_KEY")),
+        "version": "3.0.0",
     }
-
-@app.get("/")
-def serve_index():
-    return FileResponse(Path(__file__).parent / "static" / "index.html")

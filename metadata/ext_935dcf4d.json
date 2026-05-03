@@ -1,0 +1,23 @@
+{
+  "extraction_id": "ext_935dcf4d",
+  "original_filename": "ext_01ac7feb_FUnctional_Testing_WI_Five_series.pdf",
+  "saved_as": "ext_935dcf4d_ext_01ac7feb_FUnctional_Testing_WI_Five_series.pdf",
+  "num_pages": 20,
+  "num_machines": 1,
+  "machines": [
+    "SM301"
+  ],
+  "machine_summary": [
+    {
+      "machine": "SM301",
+      "status": "extraction_failed",
+      "variants": []
+    }
+  ],
+  "excel_files": [],
+  "user_input": {
+    "SM301": []
+  },
+  "status": "no_output",
+  "timestamp": "2026-05-01T04:56:45.022992"
+}
