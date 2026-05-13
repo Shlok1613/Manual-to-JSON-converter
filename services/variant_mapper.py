@@ -102,7 +102,13 @@ def merge_table_into_specs(variant_maps: Dict[str, Dict], specs_dict: Dict[str, 
 
         for field, value in table_data.items():
             if value:
-                merged[v][field] = value
+                existing = merged[v].get(field)
+
+                # override ONLY if:
+                # 1. no existing value
+                # 2. existing is weak/empty
+                if not existing or existing in ["NA", "-", "null"]:
+                    merged[v][field] = value
 
     return merged
 

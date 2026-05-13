@@ -21,12 +21,40 @@ def is_table_page(text: str) -> bool:
 
     keyword_hit = any(k in text_upper for k in TABLE_KEYWORDS)
 
-    # heuristic: many numbers + structured spacing
+    # dense numeric content
     number_density = len(re.findall(r"\d+", text)) > 20
+
+    # tabular spacing
     multi_columns = len(re.findall(r"\s{2,}", text)) > 10
 
-    return keyword_hit or (number_density and multi_columns)
+    # bad procedural indicators
+    BAD_TERMS = [
+        "PROCEDURE",
+        "STEP",
+        "TEST PROCEDURE",
+        "DIP S/W",
+        "HEALTHY CONDITION",
+    ]
 
+    bad_hits = sum(
+        1 for term in BAD_TERMS
+        if term in text_upper
+    )
+
+    score = 0
+
+    if keyword_hit:
+        score += 2
+
+    if number_density:
+        score += 1
+
+    if multi_columns:
+        score += 1
+
+    score -= bad_hits
+
+    return score >= 3
 
 def extract_table_pages(pages: List[Page]) -> List[Page]:
     return [

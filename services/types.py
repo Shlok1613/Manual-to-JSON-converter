@@ -20,6 +20,7 @@ class Block:
     page_range: List[int] = field(default_factory=list)
     pages: List[Page] = field(default_factory=list)
     header: str = ""
+    is_scope_block: bool = False
 
 
 @dataclass
@@ -67,6 +68,7 @@ class VariantData:
     specs: Specs = field(default_factory=Specs)
     test_steps: List[TestStep] = field(default_factory=list)
     audit: Dict = field(default_factory=dict)
+    raw_specs: Dict = field(default_factory=dict)
 
     def is_usable(self) -> bool:
         has_anchor = bool(

@@ -2,9 +2,27 @@ import re
 from .types import VariantData
 
 def _find_voltage_ranges(text: str):
-    matches = re.findall(r"(\d{3})\s*to\s*(\d{3})\s*VAC", text, re.IGNORECASE)
-    return matches
+    matches = re.findall(
+        r"(\d{3})\s*(?:to|-)\s*(\d{3})\s*VAC",
+        text,
+        re.IGNORECASE
+    )
 
+    cleaned = []
+
+    for lo, hi in matches:
+        lo_i = int(lo)
+        hi_i = int(hi)
+
+        # reject obvious percentages/settings
+        if lo_i <= 50 and hi_i <= 50:
+            continue
+
+        cleaned.append((lo, hi))
+
+    return cleaned
+
+    
 def _find_ref_voltage(text: str):
     m = re.search(
         r"REF\.?\s*VOLTAGE\s+(\d{3})\s*VAC",
@@ -64,23 +82,22 @@ def enrich_variant(vd: VariantData, block_text: str) -> VariantData:
         if rv:
             vd.specs.ref_voltage = rv
 
-    if not vd.specs.on_delay:
+    if not vd.specs.on_delay and vd.raw_specs:
         d = _find_delay(block_text)
         if d:
             vd.specs.on_delay = d
 
     # -------- UV / OV FALLBACK --------
-    if not vd.specs.uv_range or not vd.specs.ov_range:
+    if (
+        not vd.specs.uv_range
+        and not vd.specs.ov_range
+        and vd.raw_specs
+    ):
         ranges = _find_voltage_ranges(block_text)
 
-        if ranges:
-            # First range → UV
-            if not vd.specs.uv_range and len(ranges) >= 1:
-                vd.specs.uv_range = f"{ranges[0][0]}-{ranges[0][1]} VAC"
-
-            # Second range → OV
-            if not vd.specs.ov_range and len(ranges) >= 2:
-                vd.specs.ov_range = f"{ranges[1][0]}-{ranges[1][1]} VAC"
+        if len(ranges) >= 2:
+            vd.specs.uv_range = f"{ranges[0][0]}-{ranges[0][1]} VAC"
+            vd.specs.ov_range = f"{ranges[1][0]}-{ranges[1][1]} VAC"
 
     # -------- STEPS NORMALIZATION --------
     for step in vd.test_steps:
@@ -101,7 +118,7 @@ def enrich_variant(vd: VariantData, block_text: str) -> VariantData:
     if vd.specs.on_delay:
         dip.append(f"ON_DELAY: {vd.specs.on_delay}")
 
-    if not vd.specs.dip_switches:
-        vd.specs.dip_switches = dip
+    # DO NOT fabricate DIP switches
+    pass
 
     return vd

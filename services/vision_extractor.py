@@ -32,7 +32,7 @@ VISION_MODEL = "gemini-2.5-flash"
 DEFAULT_TIMEOUT = 120
 MAX_RETRIES = 3
 BACKOFFS = [15, 30, 60]
-MAX_IMAGES_PER_CALL = 12
+MAX_IMAGES_PER_CALL = 8
 
 
 def _get_client():
@@ -63,6 +63,9 @@ def _call_with_retry(model, parts, timeout: int, label: str) -> Optional[str]:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 fut = pool.submit(model.generate_content, parts)
                 resp = fut.result(timeout=timeout)
+
+            time.sleep(2)
+
             return resp.text
         except Exception as e:
             last_err = e
@@ -82,6 +85,17 @@ def _parse_json(raw: Optional[str], label: str) -> Optional[Dict]:
     if not raw:
         return None
     cleaned = _strip_json_fences(raw)
+    cleaned = cleaned.strip()
+
+    # remove accidental leading prose
+    json_start = cleaned.find("{")
+    if json_start > 0:
+        cleaned = cleaned[json_start:]
+
+    # remove accidental trailing prose
+    json_end = cleaned.rfind("}")
+    if json_end != -1:
+        cleaned = cleaned[:json_end + 1]
     try:
         data = json.loads(cleaned)
         return data if isinstance(data, dict) else None
@@ -138,37 +152,65 @@ def _classify_pages(block: Block) -> Dict[str, List[Page]]:
 
 
 def _classify_pages_for_variant(block: Block, variant: str) -> Dict[str, List[Page]]:
-    """For SCOPE-based docs, narrow procedure pages to those mentioning this variant."""
+    """
+    Variant-aware classification.
+    Keeps common spec pages, but narrows procedure pages.
+    """
+
     spec_pages = []
-    proc_pages_all = []
-    spec_re = re.compile(
-        r"TABLE\s*\d?\s*\(\s*PRODUCT\s*SETTINGS|ACCEPTABLE\s*LIMITS|REF\.\s*VOLTAGE",
-        re.IGNORECASE,
-    )
-    proc_re = re.compile(
-        r"PROCEDURE|FUNCTIONAL\s+TEST\s+PROCEDURE|DIP\s*S/W",
-        re.IGNORECASE,
-    )
+    proc_pages = []
+
+    variant_clean = variant.upper().replace("_", "")
     variant_re = re.compile(
-        rf"{re.escape(variant)}|{variant.replace('_','')}|{variant[:5]}",
+        rf"\b{re.escape(variant_clean)}\b|\b{re.escape(variant)}\b",
         re.IGNORECASE
     )
 
+    spec_re = re.compile(
+        r"TABLE|PRODUCT\s*SETTINGS|ACCEPTABLE\s*LIMITS|REF\.?\s*VOLTAGE",
+        re.IGNORECASE,
+    )
+
+    proc_re = re.compile(
+        r"PROCEDURE|FUNCTIONAL\s+TEST|DIP\s*S/W|\d+\.",
+        re.IGNORECASE,
+    )
+
     for p in block.pages:
-        if p.jpeg_bytes is None:
+        if not p.jpeg_bytes:
             continue
-        if spec_re.search(p.ocr_text):
+
+        text = p.ocr_text or ""
+
+        # --- SPEC pages (shared across variants) ---
+        if spec_re.search(text):
             spec_pages.append(p)
-        if proc_re.search(p.ocr_text):
-            proc_pages_all.append(p)
 
-    proc_for_variant = [p for p in proc_pages_all if variant_re.search(p.ocr_text)]
-    if len(proc_for_variant) < 4:
-        proc_for_variant = proc_pages_all
+        # --- PROCEDURE pages (variant filtered) ---
+        if proc_re.search(text):
+            if variant_re.search(text):
+                proc_pages.append(p)
+
+    # 🔴 fallback if filtering too strict
+    if len(proc_pages) < 3:
+        # fallback WITHOUT variant restriction
+        proc_pages = [
+            p for p in block.pages
+            if proc_re.search(p.ocr_text or "")
+        ][:6]
+
+    # final fallback (only if nothing found at all)
+    if not proc_pages:
+        proc_pages = [
+            p for p in block.pages
+            if proc_re.search(p.ocr_text or "")
+        ][:6]
+
+    # 🔴 fallback spec
     if not spec_pages:
-        spec_pages = [p for p in block.pages if p.jpeg_bytes is not None][:8]
+        spec_pages = [p for p in block.pages if p.jpeg_bytes][:6]
 
-    return {"spec": spec_pages, "proc": proc_for_variant}
+    return {"spec": spec_pages, "proc": proc_pages}
 
 
 SPECS_PROMPT = """You are extracting manufacturing specifications from PDF page images.
@@ -300,11 +342,17 @@ def _extract_specs(genai, machine: str, variants: List[str], pages: List[Page]) 
 
     all_data = {}
 
-    for chunk in _chunk_pages(pages, size=10):
+    # 🔴 HARD LIMIT pages for free tier
+    pages = pages[:8]
+
+    for chunk in _chunk_pages(pages, size=8):
         parts = [prompt] + _build_image_parts(chunk)
         logger.info(f"  vision specs chunk: {len(parts)-1} images, variants={variants}")
 
         raw = _call_with_retry(model, parts, DEFAULT_TIMEOUT, f"{machine} specs")
+        if not raw:
+            logger.warning(f"{machine}: Gemini failed — aborting extraction")
+            continue
         data = _parse_json(raw, f"{machine} specs")
 
         if data:
@@ -335,9 +383,13 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
         ov_range=specs.ov_range or "unknown",
         voltage_unit=specs.voltage_unit or "unknown",
     )
+    pages = pages[:6]  # 🔴 limit procedure pages
     parts = [prompt] + _build_image_parts(pages)
     logger.info(f"  vision procedure: {variant}, {len(parts)-1} images")
     raw = _call_with_retry(model, parts, DEFAULT_TIMEOUT, f"{variant} proc")
+    if not raw:
+        logger.warning(f"{machine}: Gemini failed — aborting extraction")
+        return []
     data = _parse_json(raw, f"{variant} proc")
     if not data:
         return []
@@ -397,6 +449,9 @@ def _normalize_step(raw: Dict) -> Optional[TestStep]:
         section_break=bool(raw.get("section_break")),
     )
 
+def _norm(s: str):
+    return re.sub(r"\s+", "", s).upper()
+
 
 def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None) -> Dict[str, VariantData]:
     """Vision-first extraction. Returns {variant_name: VariantData}."""
@@ -406,26 +461,32 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
         return {}
 
     variants = [v.upper() for v in (sub_machines or [block.machine])]
+    variants = [
+    v for v in variants
+    if re.match(r"^[A-Z]{2,6}\d+[A-Z0-9_]*$", v)
+]
 
     # When the block is the entire scope-fanned doc (62 pages), narrow to
     # variant-relevant procedure pages. Otherwise standard classify.
-    is_wide_block = (
-        len(block.pages) > 10
-        or "SCOPE" in block.text.upper()
-    )
-    if is_wide_block:
-        # specs likely on early-numbered pages, common across all variants
-        spec_pages: List[Page] = extract_table_pages(block.pages)
-        proc_pages_per_variant: Dict[str, List[Page]] = {}
-        for v in variants:
-            cls = _classify_pages_for_variant(block, v)
-            if not spec_pages:
-                spec_pages = cls["spec"]
-            proc_pages_per_variant[v] = cls["proc"]
-    else:
-        cls = _classify_pages(block)
+    # 🔴 Phase 5 Part 2: always variant-aware procedure mapping
+
+    # 🔴 Phase 5 FIX: robust spec page selection
+    spec_pages = extract_table_pages(block.pages)
+
+    # keep only highest-confidence subset
+    spec_pages = spec_pages[:8]
+
+    if not spec_pages:
+        # fallback using classifier (any variant)
+        cls = _classify_pages_for_variant(block, variants[0])
         spec_pages = cls["spec"]
-        proc_pages_per_variant = {v: cls["proc"] for v in variants}
+
+    proc_pages_per_variant: Dict[str, List[Page]] = {}
+
+    for v in variants:
+        cls = _classify_pages_for_variant(block, v)
+
+        proc_pages_per_variant[v] = cls["proc"]
 
     logger.info(f"{block.machine}: spec_pages={len(spec_pages)} variants={len(variants)}")
 
@@ -433,15 +494,8 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
     table_grids = extract_table_grids(spec_pages)
     variant_maps = extract_variant_mappings(table_grids)
 
-    # ✅ KEEP ONLY REQUESTED VARIANTS
-    filtered_variant_maps = {}
-
-    for v in variants:
-        key = v.upper()
-        if key in variant_maps:
-            filtered_variant_maps[key] = variant_maps[key]
-
-    variant_maps = filtered_variant_maps
+    # ✅ DO NOT FILTER — keep full table context
+    logger.info(f"{block.machine}: full table variants → {list(variant_maps.keys())}")
 
     logger.info(f"{block.machine}: mapped variants from tables → {list(variant_maps.keys())}")
     logger.info(f"{block.machine}: extracted {len(table_grids)} table grids")
@@ -457,16 +511,29 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
         spec_dict = raw_specs.get(v_key) or {}
         if not spec_dict:
             for k, val in raw_specs.items():
-                if v_key in k.replace(" ", "").upper():
+                if _norm(v_key) == _norm(k):
                     spec_dict = val
                     break
 
         specs = _normalize_specs(spec_dict)
+        valid_voltage_specs = any([
+            specs.uv_range,
+            specs.ov_range,
+            specs.lv_cutoff,
+            specs.hv_cutoff,
+        ])
+
+        if not valid_voltage_specs:
+            logger.warning(f"{v}: skipping procedure extraction due to missing specs")
+            continue
+        
+        # 🔴 Phase 4: store raw vision specs for validation
+        variant_raw = raw_specs.get(v_key, {}) if isinstance(raw_specs, dict) else {}
         proc_pages = proc_pages_per_variant.get(v, [])
         steps_raw = _extract_procedure(genai, block.machine, v, specs, proc_pages)
         steps = [s for s in (_normalize_step(r) for r in steps_raw) if s is not None]
 
-        out[v] = VariantData(
+        vd = VariantData(
             name=v,
             specs=specs,
             test_steps=steps,
@@ -478,6 +545,11 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
                 "raw_step_count": len(steps_raw),
             },
         )
+
+        # 🔴 attach raw specs
+        vd.raw_specs = variant_raw
+
+        out[v] = vd
 
     return out
 

@@ -1,5 +1,6 @@
 from typing import List
 from services.types import Page
+import re
 
 
 def filter_pages_for_variant(variant: str, pages: List[Page]) -> List[Page]:
@@ -18,7 +19,7 @@ def filter_pages_for_variant(variant: str, pages: List[Page]) -> List[Page]:
 
     filtered = [
         p for p in pages
-        if variant_upper in (p.ocr_text or "").upper()
+        if re.search(rf"\b{re.escape(variant_upper)}\b", (p.ocr_text or ""), re.IGNORECASE)
     ]
 
     # fallback → avoid empty input to vision

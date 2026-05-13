@@ -26,7 +26,7 @@ def is_table_line(line: str) -> bool:
         return False
 
     # must contain at least 2 numbers OR number range
-    has_numbers = bool(re.search(r"\d", line))
+    has_numbers = len(re.findall(r"\d", line)) >= 2
 
     # detect value-like patterns (important)
     has_range = bool(re.search(r"\d+\s*[-to]+\s*\d+", line, re.IGNORECASE))

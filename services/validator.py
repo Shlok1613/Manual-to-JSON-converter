@@ -49,6 +49,12 @@ def _validate_specs(specs: Specs, variant: str) -> List[str]:
     if specs.voltage_unit and specs.voltage_unit not in ("P-P", "P-N"):
         flags.append(f"voltage_unit invalid: {specs.voltage_unit!r}")
 
+    if not specs.voltage_unit:
+        flags.append("missing voltage_unit")
+
+    if not specs.uv_range and not specs.ov_range:
+        flags.append("no voltage ranges extracted")
+
     for fname in ("uv_range", "ov_range", "asymmetry"):
         val = getattr(specs, fname)
         if val and isinstance(val, str) and not _RANGE_RE.search(val) and not re.search(r"\d", val):
@@ -85,8 +91,8 @@ def _validate_step(step: TestStep) -> List[str]:
     flags: List[str] = []
     if not step.step_name or not step.step_name.strip():
         flags.append("missing step_name")
-    if not step.voltages_pn:
-        flags.append("missing voltages_pn")
+    if not step.voltages_pn or not any(re.search(r"\d", v) for v in step.voltages_pn):
+        flags.append("missing valid voltages_pn")
     for v in step.voltages_pn:
         if isinstance(v, str) and not re.search(r"\d", v):
             flags.append(f"voltage_pn missing number: {v!r}")
@@ -130,4 +136,38 @@ def validate_variants(variants: Dict[str, VariantData]) -> Dict[str, VariantData
             if sf:
                 logger.warning(f"  {name} step {i+1}: {sf}")
     _cross_check_variants(variants)
+    for vname, vdata in variants.items():
+        # 🔴 Phase 4: table vs vision consistency check
+        mismatch_flags = compare_table_vs_vision(vdata)
+
+        if mismatch_flags:
+            logger.warning(f"  {vname}: {len(mismatch_flags)} table/vision mismatch(s)")
+            for f in mismatch_flags:
+                logger.warning(f"    - {f}")
     return variants
+
+def compare_table_vs_vision(vdata):
+    """
+    Compare table-derived specs vs vision-derived specs.
+    Logs mismatches without modifying data.
+    """
+
+    flags = []
+
+    specs = vdata.specs
+    raw = getattr(vdata, "raw_specs", None)
+
+    if not raw:
+        return flags
+
+    # Compare selected critical fields
+    fields = ["uv_range", "ov_range", "ref_voltage", "on_delay", "off_delay"]
+
+    for f in fields:
+        table_val = getattr(specs, f, None)
+        vision_val = raw.get(f)
+
+        if table_val and vision_val and table_val != vision_val:
+            flags.append(f"{f} mismatch (table='{table_val}' vs vision='{vision_val}')")
+
+    return flags

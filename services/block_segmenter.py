@@ -10,6 +10,7 @@ import re
 import logging
 from typing import List, Optional
 from collections import Counter
+from services.table_extractor import detect_variants_from_text
 
 from .types import Page, Block
 
@@ -42,20 +43,37 @@ FORCE_SPLIT_PATTERNS = [
 ]
 
 MACHINE_NAME_PATTERN = re.compile(
-    r"\b(SPPR|SM\d+_[A-Z]|SM\d+|DSMR|DMS\d+|DMA\d+|MAG\w+|MAC\w+|MG\d+\w+|MD\d+\w+|MB\d+\w+)\b",
+    r"\b(?:"
+    r"SM\d+(?:_[A-Z0-9]+)?|"
+    r"DMS\d+(?:_[A-Z0-9]+)?|"
+    r"DSMR|"
+    r"MAG\d+[A-Z0-9]+|"
+    r"MAC\d+[A-Z0-9]+|"
+    r"MG[A-Z0-9]{3,}"
+    r")\b",
     re.IGNORECASE,
 )
 SCOPE_PATTERN = re.compile(r"SCOPE\s*:\s*([\w/\s]+)", re.IGNORECASE)
 
 
 def _find_machine_name(text: str, fallback: str = "UNKNOWN") -> str:
-    sm = SCOPE_PATTERN.search(text)
-    if sm:
-        match = MACHINE_NAME_PATTERN.search(sm.group(1))
-        if match:
-            return match.group(1).upper()
-    match = MACHINE_NAME_PATTERN.search(text)
-    return match.group(1).upper() if match else fallback
+    matches = MACHINE_NAME_PATTERN.findall(text.upper())
+
+    if not matches:
+        return fallback
+    counts = Counter(matches)
+
+    # prefer frequent + well-structured tokens
+    candidates = [
+        m for m, c in counts.items()
+        if c >= 2 and len(m) >= 4
+    ]
+
+    if not candidates:
+        candidates = list(counts.keys())
+
+    # pick most frequent
+    return max(candidates, key=lambda x: counts[x])
 
 
 def _has_table_spec(text: str) -> bool:
@@ -90,6 +108,51 @@ def segment_blocks(pages: List[Page], user_names: Optional[List[str]] = None) ->
         return []
 
     full_text = "\n\n".join(p.ocr_text for p in pages)
+
+        # 🔴 FIX: Early SCOPE-based detection (for WI PDFs)
+    scope_match = SCOPE_PATTERN.search(full_text)
+
+    if scope_match:
+        scope_line = scope_match.group(1)
+
+        # Extract machine names like MAG03D0424
+        machines = re.findall(
+            r"\b(MAG\d+[A-Z0-9]+|MAC\d+[A-Z0-9]+|SM\d+_[A-Z]|SM\d+)\b",
+            scope_line,
+            re.IGNORECASE
+        )
+
+        machines = list(dict.fromkeys(m.upper() for m in machines))
+
+        # Only trigger if multiple machines found → real SCOPE doc
+        if len(machines) >= 5:
+            logger.info(f"SCOPE detected (early): {machines}")
+
+            early_pages = pages
+            early_range = [p.num for p in pages]
+            full_text_combined = "\n\n".join(p.ocr_text for p in pages)
+
+            blocks = [
+                Block(
+                    machine=m,
+                    text=full_text_combined,
+                    page_range=list(early_range),
+                    pages=list(early_pages),
+                    header=f"SCOPE: {m}",
+                    is_scope_block=True,
+                )
+                for m in machines
+            ]
+
+            # apply user filter BEFORE return
+            if user_names:
+                wanted = [n.upper() for n in user_names]
+                blocks = [
+                    b for b in blocks
+                    if b.machine.upper() in wanted
+                ]
+
+            return blocks
 
     if user_names:
         user_names = [
@@ -243,10 +306,69 @@ def segment_blocks(pages: List[Page], user_names: Optional[List[str]] = None) ->
             if seen_count[b.machine] > 1:
                 b.machine = f"{b.machine}_{seen_count[b.machine]}"
 
+    # fallback ONLY when segmentation genuinely failed
+    has_real_machine = any(
+        not b.machine.startswith("MACHINE_")
+        and b.machine != "UNKNOWN"
+        and not b.machine.startswith("AUTO")
+        for b in blocks
+    )
+
+    if len(blocks) <= 1 and not has_real_machine:
+        logger.info("Segmentation fallback → using variant density split")
+
+        split_blocks = split_by_variant_density(pages)
+
+        if len(split_blocks) > 1:
+            blocks = [
+                Block(
+                    machine=f"AUTO_{i+1}",
+                    text="\n\n".join(p.ocr_text for p in b),
+                    page_range=[p.num for p in b],
+                    pages=b,
+                )
+            for i, b in enumerate(split_blocks)
+        ]
     logger.info(f"Segmentation: {len(blocks)} block(s)")
     for b in blocks:
         sample = b.page_range[:5]
         more = "..." if len(b.page_range) > 5 else ""
         logger.info(f"  {b.machine:18s} pages={sample}{more}  ({len(b.text):,} chars)")
+
+    return blocks
+
+def split_by_variant_density(pages):
+    """
+    Split document into blocks based on variant clusters
+    """
+    blocks = []
+    current_pages = []
+    current_variants = set()
+
+    for p in pages:
+        text = p.ocr_text or ""
+        variants = set(detect_variants_from_text(text))
+
+        if not current_pages:
+            current_pages.append(p)
+            current_variants = variants
+            continue
+
+        # if variant set changes significantly → new block
+        if (
+            variants
+            and len(variants) >= 2
+            and variants != current_variants
+            and len(current_pages) >= 2
+        ):
+            blocks.append(current_pages)
+            current_pages = [p]
+            current_variants = variants
+        else:
+            current_pages.append(p)
+            current_variants |= variants
+
+    if current_pages:
+        blocks.append(current_pages)
 
     return blocks

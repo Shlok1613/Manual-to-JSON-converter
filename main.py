@@ -9,12 +9,14 @@ Pipeline:
   4. validate_variants   (deterministic rules, flag bad data)
   5. write_*_workbook    (template-matching xlsx)
 """
+import os
+import json
+import logging
+import re
+import time
 from pathlib import Path
 from datetime import datetime
-import logging
-import json
-import os
-from services.types import Specs
+from typing import Any
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
@@ -36,7 +38,7 @@ from services.template_writer import write_variant_workbook, write_consolidated_
 from services.enricher import enrich_variant
 from services.normalizer import normalize_variant
 from services.table_extractor import detect_variants_from_text
-from services.variant_page_mapper import filter_pages_for_variant
+from services.spec_linker import link_specs_to_steps
 
 Base.metadata.create_all(bind=engine)
 
@@ -90,6 +92,7 @@ async def extract_pdf(
     file: UploadFile = File(...),
     machine_data: str = Form(default="{}"),
 ):
+    start = time.time()
     extraction_id = generate_extraction_id()
     logger.info(f"=== New extraction: {extraction_id} - {file.filename} ===")
 
@@ -133,7 +136,11 @@ async def extract_pdf(
 
     # 2. segment blocks
     try:
-        blocks = segment_blocks(pages, user_names=user_names if user_names else None)
+        # 🔴 Phase 4: always segment FULL document
+        blocks = segment_blocks(
+            pages,
+            user_names=user_names if user_names else None
+        )
     except Exception as e:
         logger.info(f"Block segmentation failed: {e}")
         blocks = [Block(
@@ -143,67 +150,76 @@ async def extract_pdf(
         )]
 
     excel_files = []
-    machine_summary = []
+    machine_summary: list[dict[str, Any]] = []
+    seen_machines = set()
 
     # 3-5. extract per block, validate, write Excel
-    for block in blocks:
+    MAX_MACHINES = 5
+    for i, block in enumerate(blocks):
+        if not machine_dict and i >= MAX_MACHINES:
+            logger.info("Auto-limit reached for empty input")
+            break
         machine_name = block.machine
-        sub_machines = machine_dict.get(machine_name, [])
+        if machine_name in seen_machines:
+            logger.info(f"{machine_name}: duplicate block skipped")
+            continue
 
-        # ✅ If user did NOT provide variants → auto detect
-        if not sub_machines:
-            detected = detect_variants_from_text(block.text)
+        seen_machines.add(machine_name)
 
-            detected = [d for d in detected if d != machine_name]
+        # 🔴 Phase 4: skip blocks not requested (ONLY if user specified machines)
+        if machine_dict and machine_name not in machine_dict:
+            logger.info(f"{machine_name}: skipped (not in user input)")
+            continue
 
-            if detected:
-                logger.info(f"{machine_name}: auto-detected variants → {detected}")
-                sub_machines = detected
+        user_variants = machine_dict.get(machine_name, [])
 
-        logger.info(f"\n--- {machine_name} (variants: {sub_machines or 'NONE'}) ---")
+        # 🔴 Auto-detect from text
+        detected_variants = detect_variants_from_text(block.text)
+        detected_variants = [d for d in detected_variants if d != machine_name]
 
-        if sub_machines:
-            valid_names = [
-                v for v in sub_machines
-                if v in block.text.upper()
+        # Blocks generated from SCOPE fan-out already represent
+        # a single machine. Do not auto-detect sibling IDs as variants.
+        if block.is_scope_block:
+            sub_machines = [machine_name]
+        # 🔴 Hybrid logic
+        # 🔴 STRICT FILTER: only process requested machine if given
+        elif user_variants:
+            # Use user input, but keep only valid ones
+            sub_machines = [
+                v for v in user_variants
+                if re.search(rf"\b{re.escape(v)}\b", block.text, re.IGNORECASE)
             ]
 
-            if not valid_names:
-                logger.warning(f"{machine_name}: all user variants invalid → skipping")
-                continue
+            if not sub_machines:
+                logger.warning(f"{machine_name}: user variants invalid → falling back to auto-detect")
+                MAX_VARIANTS = 2  # 🔴 HARD LIMIT (production-safe)
 
-            removed = set(sub_machines) - set(valid_names)
-            if removed:
-                logger.warning(f"{machine_name}: removed invalid variants → {list(removed)}")
+                sub_machines = [
+                    v for v in detected_variants
+                    if re.match(r"^[A-Z]{2,6}\d+[A-Z0-9_]*$", v)
+                ][:8]
+        else:
+            MAX_VARIANTS = 2
+            sub_machines = [v for v in detected_variants
+                if re.match(r"^[A-Z]{2,6}\d+[A-Z0-9_]*$", v)
+            ][:8]
 
-            sub_machines = valid_names
+        if sub_machines:
+            logger.info(f"{machine_name}: final variants → {sub_machines}")
+
+        logger.info(f"\n--- {machine_name} (variants: {sub_machines or 'NONE'}) ---")
                 
         try:
             if sub_machines:
-                variants = {}
-
-                for variant in sub_machines:
-                    filtered_pages = filter_pages_for_variant(variant, block.pages)
-
-                    if len(filtered_pages) < 3:
-                        logger.warning(f"{machine_name}/{variant}: too few pages after filter → using full block")
-                        filtered_pages = block.pages
-
-                    sub_block = Block(
-                        machine=block.machine,
-                        text="\n\n".join(p.ocr_text for p in filtered_pages),
-                        page_range=[p.num for p in filtered_pages],
-                        pages=filtered_pages,
+                # 🔴 Phase 5 FIX: single extraction for all variants
+                try:
+                    variants = extract_machine_data(
+                        block=block,
+                        sub_machines=sub_machines,
                     )
-
-                    try:
-                        result = extract_machine_data(
-                            block=sub_block,
-                            sub_machines=[variant],
-                        )
-                        variants.update(result)
-                    except Exception as e:
-                        logger.info(f"{machine_name}/{variant}: extraction failed: {e}")
+                except Exception as e:
+                    logger.info(f"{machine_name}: extraction failed: {e}")
+                    variants = {}
 
             else:
                 variants = extract_machine_data(
@@ -224,6 +240,9 @@ async def extract_pdf(
             vdata = normalize_variant(vdata)
             variants[vname] = vdata
 
+        # 🔴 Phase 4: spec-procedure linking
+        variants = link_specs_to_steps(variants)
+
         # Then validate
         variants = validate_variants(variants)
 
@@ -232,10 +251,14 @@ async def extract_pdf(
         def _is_fatal(flags):
             return any(any(k in f for k in FATAL_KEYWORDS) for f in flags)
 
-        usable = {
-            n: vd for n, vd in variants.items()
-            if extraction_was_successful(vd) and not _is_fatal(vd.specs.flags)
-        }
+        usable = {}
+        rejected = {}
+
+        for n, vd in variants.items():
+            if extraction_was_successful(vd) and not _is_fatal(vd.specs.flags):
+                usable[n] = vd
+            else:
+                rejected[n] = vd
 
         if not usable:
             logger.warning(f"{machine_name}: no variant produced usable data")
@@ -299,6 +322,8 @@ async def extract_pdf(
     _save_metadata(extraction_id, metadata)
     _persist_extraction(extraction_id, metadata)
 
+    logger.info(f"Total Extraction time = {time.time()-start:.1f}s")
+
     return ExtractionResult(
         extraction_id=extraction_id,
         filename=file.filename,
@@ -306,7 +331,7 @@ async def extract_pdf(
         num_machines=len(blocks),
         machines=[b.machine for b in blocks],
         excel_files=excel_files,
-        status=metadata["status"],
+        status=str(metadata["status"]),
     )
 
 

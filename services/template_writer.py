@@ -273,7 +273,7 @@ def write_consolidated_workbook(extraction_id: str, parent_machine: str,
         _write_variant_sheet(ws, vdata)
 
     safe_parent = parent_machine.replace("/", "_").replace(" ", "_")
-    filename = f"{extraction_id}_{safe_parent}.xlsx"
+    filename = f"{extraction_id}_{safe_parent}_All_CatID.xlsx"
     output_dir.mkdir(parents=True, exist_ok=True)
     wb.save(output_dir / filename)
     logger.info(f"  wrote consolidated: {filename}")
