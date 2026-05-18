@@ -141,6 +141,15 @@ async def extract_pdf(
             pages,
             user_names=user_names if user_names else None
         )
+        logger.info("========== SEGMENTATION RESULT ==========")
+
+        for i, block in enumerate(blocks):
+            logger.info(
+                f"[BLOCK {i}] "
+                f"machine={block.machine} "
+                f"pages={len(block.pages)} "
+                f"text_len={len(block.text or '')}"
+        )
     except Exception as e:
         logger.info(f"Block segmentation failed: {e}")
         blocks = [Block(
@@ -175,6 +184,10 @@ async def extract_pdf(
 
         # 🔴 Auto-detect from text
         detected_variants = detect_variants_from_text(block.text)
+        logger.info(
+            f"[VARIANTS] machine={block.machine} "
+            f"detected={detected_variants}"
+        )
         detected_variants = [d for d in detected_variants if d != machine_name]
 
         # Blocks generated from SCOPE fan-out already represent
@@ -246,18 +259,46 @@ async def extract_pdf(
         # Then validate
         variants = validate_variants(variants)
 
-        FATAL_KEYWORDS = ["physically invalid", "UV max", "LV cutoff"]
-
-        def _is_fatal(flags):
-            return any(any(k in f for k in FATAL_KEYWORDS) for f in flags)
+        def _sanitize_bad_specs(vd):
+            """
+            Clear spec fields that triggered physically-invalid flags.
+            Keeps procedure steps intact. Better partial output than zero output.
+            """
+            flags = vd.specs.flags
+            if any("UV max" in f or "physically invalid" in f for f in flags):
+                logger.warning(f"[SANITIZE] {vd.name}: UV/OV overlap — clearing uv_range and ov_range")
+                vd.specs.uv_range = None
+                vd.specs.ov_range = None
+                vd.specs.flags = [f for f in flags if "UV max" not in f and "physically invalid" not in f]
+            if any("LV cutoff >= HV cutoff" in f for f in vd.specs.flags):
+                logger.warning(f"[SANITIZE] {vd.name}: LV/HV overlap — clearing hv_cutoff")
+                vd.specs.hv_cutoff = None
+                vd.specs.flags = [f for f in vd.specs.flags if "LV cutoff" not in f]
+            return vd
 
         usable = {}
         rejected = {}
 
         for n, vd in variants.items():
-            if extraction_was_successful(vd) and not _is_fatal(vd.specs.flags):
+            vd = _sanitize_bad_specs(vd)
+            variants[n] = vd
+            success = extraction_was_successful(vd)
+
+            logger.info(
+                f"[VARIANT_CHECK] "
+                f"variant={n} "
+                f"success={success} "
+                f"steps={len(vd.test_steps)} "
+                f"ref_voltage={vd.specs.ref_voltage} "
+                f"uv={vd.specs.uv_range} "
+                f"ov={vd.specs.ov_range} "
+                f"flags={vd.specs.flags}"
+            )
+
+            if success:
                 usable[n] = vd
             else:
+                logger.warning(f"[REJECTED_VARIANT] {n} rejected — is_usable()=False")
                 rejected[n] = vd
 
         if not usable:

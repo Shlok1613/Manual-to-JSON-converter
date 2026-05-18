@@ -123,8 +123,8 @@ def _write_header_a(ws, specs: Specs, layout: Dict) -> None:
     ws.cell(row=2, column=off_col, value="off delay").font = HEADER_FONT
 
     ws.cell(row=3, column=layout["step_col"], value="DIP S/W setting").font = LABEL_FONT
-    dips = specs.dip_switches or ["1: ?", "2: ?", "3: ?", "4: ?", "5: ?"]
-    for i, dip in enumerate(dips[:5]):
+    dips = specs.dip_switches or []
+    for i, dip in enumerate(dips):
         c = ws.cell(row=3 + i, column=layout["settings_col"], value=str(dip))
         c.alignment = WRAP_TOP
 
@@ -161,7 +161,7 @@ def _write_step(ws, row: int, step: TestStep, layout: Dict) -> int:
     name_cell.border = BORDER
 
     if layout["has_settings_col"] and step.settings:
-        for i, s in enumerate(step.settings[:3]):
+        for i, s in enumerate(step.settings):
             c = ws.cell(row=row + i, column=layout["settings_col"], value=s)
             c.alignment = WRAP_TOP
             c.border = BORDER

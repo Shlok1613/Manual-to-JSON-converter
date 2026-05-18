@@ -77,4 +77,15 @@ class VariantData:
             or self.specs.lv_cutoff
         )
         has_steps = len(self.test_steps) >= 1
+
+        # Procedure-first: if we extracted meaningful steps, output regardless of spec anchor.
+        # Steps already contain voltages, LEDs, relay, DIP — that is the Excel content.
+        # Spec anchor is a quality signal, not a hard gate.
+        steps_with_voltage = sum(
+            1 for s in self.test_steps
+            if s.voltages_pn and any(c.isdigit() for v in s.voltages_pn for c in v)
+        )
+        if steps_with_voltage >= 2:
+            return True
+
         return has_anchor and has_steps

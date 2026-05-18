@@ -1,0 +1,17 @@
+{
+  "extraction_id": "ext_c6350e03",
+  "original_filename": "WI.pdf",
+  "saved_as": "ext_c6350e03_WI.pdf",
+  "num_pages": 62,
+  "num_machines": 1,
+  "machines": [
+    "MAG03D0426"
+  ],
+  "machine_summary": [],
+  "excel_files": [],
+  "user_input": {
+    "MAG03D0426": []
+  },
+  "status": "no_output",
+  "timestamp": "2026-05-18T09:28:33.620640"
+}

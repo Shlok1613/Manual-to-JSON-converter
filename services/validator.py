@@ -52,7 +52,9 @@ def _validate_specs(specs: Specs, variant: str) -> List[str]:
     if not specs.voltage_unit:
         flags.append("missing voltage_unit")
 
-    if not specs.uv_range and not specs.ov_range:
+    # Only flag missing voltage ranges when there are no procedure steps to compensate.
+    # Procedure-rich documents (WI PDFs) encode voltage data inside steps, not spec tables.
+    if not specs.uv_range and not specs.ov_range and not specs.lv_cutoff:
         flags.append("no voltage ranges extracted")
 
     for fname in ("uv_range", "ov_range", "asymmetry"):
@@ -62,8 +64,15 @@ def _validate_specs(specs: Specs, variant: str) -> List[str]:
 
     for fname in ("uv_threshold_pct", "ov_threshold_pct"):
         val = getattr(specs, fname)
-        if val and not re.fullmatch(r"\s*\d+(?:\.\d+)?\s*%\s*", str(val)):
-            flags.append(f"{fname} not a percentage: {val!r}")
+        if val:
+            if not re.match(
+                r"^\d+(\.\d+)?%\s*(\(.+\))?$",
+                val.strip(),
+                re.IGNORECASE,
+            ):
+                flags.append(
+                    f"{fname} not a percentage: '{val}'"
+                )
 
     uv = _parse_range(specs.uv_range)
     ov = _parse_range(specs.ov_range)
@@ -79,7 +88,33 @@ def _validate_specs(specs: Specs, variant: str) -> List[str]:
         val = getattr(specs, fname)
         if val and isinstance(val, str):
             v_low = val.lower()
-            has_unit = any(u in v_low for u in ("sec", "ms", "min", "instant", "continuous"))
+            has_unit = any(
+                u in v_low
+                for u in (
+                    "sec",
+                    "secs",
+                    "second",
+                    "seconds",
+                    "ms",
+                    "millisecond",
+                    "min",
+                    "minute",
+                    "instant",
+                    "continuous",
+                )
+            )
+
+            # OCR collapsed units:
+            # "10.5s"
+            # "7s"
+            # "2.5m"
+            if not has_unit:
+                has_unit = bool(
+                    re.search(
+                        r"\d+(?:\.\d+)?\s*[smh]\b",
+                        v_low
+                    )
+                )
             has_dash = val.strip() in {"-", "—", "–"}
             if not has_unit and not has_dash and re.search(r"\d", val):
                 flags.append(f"{fname} missing time unit: {val!r}")

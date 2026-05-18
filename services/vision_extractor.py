@@ -172,7 +172,11 @@ def _classify_pages_for_variant(block: Block, variant: str) -> Dict[str, List[Pa
     )
 
     proc_re = re.compile(
-        r"PROCEDURE|FUNCTIONAL\s+TEST|DIP\s*S/W|\d+\.",
+        r"PROCEDURE"
+        r"|FUNCTIONAL\s+TEST"
+        r"|DIP\s*S/W"
+        r"|TEST\s+PROCEDURE"
+        r"|CHECK\s+POINT",
         re.IGNORECASE,
     )
 
@@ -187,30 +191,59 @@ def _classify_pages_for_variant(block: Block, variant: str) -> Dict[str, List[Pa
             spec_pages.append(p)
 
         # --- PROCEDURE pages (variant filtered) ---
-        if proc_re.search(text):
+        has_proc_marker = proc_re.search(text)
+
+        # Step numbering only counts if it looks like an actual procedure list
+        has_step_pattern = bool(
+            re.search(r"^\s*\d+\.\s+[A-Z]", text, re.MULTILINE)
+        )
+
+        if (has_proc_marker or has_step_pattern):
             if variant_re.search(text):
                 proc_pages.append(p)
 
-    # 🔴 fallback if filtering too strict
+    # Fallback: if too few variant-specific proc pages, find the page where the
+    # variant name first appears in a procedure context, then take a window around it.
+    # This is more targeted than taking the first 6 proc pages from a 60-page document.
     if len(proc_pages) < 3:
-        # fallback WITHOUT variant restriction
-        proc_pages = [
+        all_proc = [
             p for p in block.pages
             if proc_re.search(p.ocr_text or "")
-        ][:6]
+        ]
+        # Find anchor: first proc page that mentions the variant
+        anchor_idx = next(
+            (i for i, p in enumerate(all_proc) if variant_re.search(p.ocr_text or "")),
+            None
+        )
+        if anchor_idx is not None:
+            # Take a window of 6 pages centered on the anchor
+            start = max(0, anchor_idx - 1)
+            proc_pages = all_proc[start: start + 6]
+        else:
+            proc_pages = all_proc[:20]
 
-    # final fallback (only if nothing found at all)
+    # Final fallback
     if not proc_pages:
         proc_pages = [
             p for p in block.pages
             if proc_re.search(p.ocr_text or "")
-        ][:6]
+        ][:20]
 
     # 🔴 fallback spec
     if not spec_pages:
         spec_pages = [p for p in block.pages if p.jpeg_bytes][:6]
 
-    return {"spec": spec_pages, "proc": proc_pages}
+    logger.info(
+        f"[PAGE_CLASSIFICATION] "
+        f"variant={variant} "
+        f"spec_pages={[p.num for p in spec_pages]} "
+        f"proc_pages={[p.num for p in proc_pages]}"
+    )
+
+    return {
+        "spec_pages": spec_pages,
+        "proc_pages": proc_pages,
+    }
 
 
 SPECS_PROMPT = """You are extracting manufacturing specifications from PDF page images.
@@ -271,54 +304,109 @@ Return JSON in this exact shape (one entry per variant):
 Return ONLY valid JSON. No markdown, no code fences, no commentary."""
 
 
-PROCEDURE_PROMPT = """You are converting a manufacturing test procedure into structured test step rows.
+PROCEDURE_PROMPT = """You are extracting a manufacturing TEST PROCEDURE from industrial PDF pages.
 
 VARIANT: {variant}
+
 KNOWN SPECS:
   ref_voltage:  {ref_voltage}
   uv_range:     {uv_range}
   ov_range:     {ov_range}
   voltage_unit: {voltage_unit}
 
-Read the procedure pages. The procedure is a sequence of numbered steps,
-sometimes grouped into lettered sections (A], B], C], D]) where each section
-starts with a different DIP S/W configuration.
+IMPORTANT CONTEXT:
 
-Output one TEST STEP per meaningful verification action. Each test step has
-this exact shape:
+These pages may be:
+- formal numbered procedures
+- work instructions (WI)
+- instructional process sheets
+- shared procedures for multiple machine variants
+- mixed layouts containing tables + instructions
+
+The procedure may NOT be perfectly tabular.
+
+Your task:
+Extract ALL real machine-testing actions relevant to the variant.
+
+Even if the document is instructional or spread across pages,
+convert the testing flow into structured TEST STEPS.
+
+A test step may come from:
+- numbered instructions
+- verification actions
+- DIP switch configuration sections
+- healthy/fault condition checks
+- voltage-setting actions
+- relay verification
+- LED verification
+- fault testing sequences
+
+DO NOT return empty output unless absolutely no testing actions exist.
+
+Each test step must have this shape:
+
 {{
-  "step_name":     short label (e.g. "healthy condition", "UV faulty condition with delay"),
-  "settings":      array of up to 3 strings — pot/UV/OV/delay settings active for this step
-                   e.g. ["UV = 8%", "OV = 22%", "DELAY = 3SEC"]
-                   OR empty array if no settings to display,
-  "voltages_pn":   array of exactly 3 strings — phase-to-neutral voltages
-                   e.g. ["RN : 120", "YN : 120", "BN : 120"]
-                   If a step changes only one phase, still report all three
-                   using the carried-forward values for the other phases,
-  "voltage_pp":    string|null — phase-to-phase voltage if the procedure mentions one,
-  "leds":          array of 1 to 4 strings — LED status lines
-                   e.g. ["PWR (GREEN LED) : ON", "UV (RED LED) : OFF",
-                         "OV (RED LED) : OFF", "ASY (RED LED) : OFF"],
-  "relay_status":  "ON"|"OFF"|"OFF in 2-4 sec"|"-"|null,
-  "on_delay":      string|null e.g. "4-6 sec" / "Instant ON" / "Continuous ON",
-  "off_delay":     string|null e.g. "2-4 SEC" / "-" / "Continuous OFF",
-  "section_break": boolean — true ONLY when this step starts a new
-                   DIP S/W configuration block, otherwise false
+  "step_name": short descriptive label,
+
+  "settings": [
+    "1: OFF",
+    "2: ON",
+    "3: OFF"
+  ],
+
+  "voltages_pn": [
+    "RN : 230",
+    "YN : 230",
+    "BN : 230"
+  ],
+
+  "voltage_pp": string|null,
+
+  "leds": [
+    "PWR (GREEN LED) : ON",
+    "UV (RED LED) : OFF"
+  ],
+
+  "relay_status": string|null,
+  "on_delay": string|null,
+  "off_delay": string|null,
+
+  "section_break": boolean
 }}
 
-RULES:
-- Carry forward values from previous steps when the procedure doesn't
-  re-state them (e.g. voltages stay 240 V P-N until the procedure changes
-  them).
-- DO NOT invent steps. Each step must correspond to an actual numbered
-  verification action in the PDF.
-- DO NOT skip the "healthy condition" step that opens each section.
-- Set section_break=true on the FIRST step of each new DIP S/W
-  configuration (typically labelled "DIP S/W setting" or new lettered section).
+CRITICAL RULES:
 
-Return JSON: {{ "test_steps": [ ... ] }}
+1. DO NOT invent values.
+   Missing values => null or [].
 
-Return ONLY valid JSON. No markdown, no commentary."""
+2. If a section starts with DIP S/W settings,
+   preserve the FULL DIP configuration.
+
+3. DO NOT require numbered steps.
+   Instructional WI actions still count as steps.
+
+4. If voltages/settings remain unchanged,
+   carry forward previous values.
+
+5. Prefer extracting imperfect but real steps
+   instead of returning an empty list.
+
+6. Include healthy condition checks,
+   fault simulations,
+   relay checks,
+   LED checks,
+   voltage change actions.
+
+Return JSON only:
+
+{{
+  "test_steps": [ ... ]
+}}
+
+No markdown.
+No explanation.
+No commentary.
+"""
 
 
 def _build_image_parts(pages: List[Page]) -> list:
@@ -343,7 +431,17 @@ def _extract_specs(genai, machine: str, variants: List[str], pages: List[Page]) 
     all_data = {}
 
     # 🔴 HARD LIMIT pages for free tier
-    pages = pages[:8]
+    # Keep broader spec context for WI-style manuals
+    if len(pages) <= 8:
+        selected_pages = pages
+
+    elif len(pages) <= 20:
+        selected_pages = pages[:10]
+
+    else:
+        selected_pages = pages[:12]
+
+    pages = selected_pages
 
     for chunk in _chunk_pages(pages, size=8):
         parts = [prompt] + _build_image_parts(chunk)
@@ -354,6 +452,13 @@ def _extract_specs(genai, machine: str, variants: List[str], pages: List[Page]) 
             logger.warning(f"{machine}: Gemini failed — aborting extraction")
             continue
         data = _parse_json(raw, f"{machine} specs")
+        logger.info(
+            f"{machine}: raw spec response keys="
+            f"{list(data.keys()) if isinstance(data, dict) else 'invalid'}"
+        )
+        logger.info(
+            f"{machine}: raw spec payload={data}"
+        )
 
         if data:
             cleaned = {
@@ -383,7 +488,30 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
         ov_range=specs.ov_range or "unknown",
         voltage_unit=specs.voltage_unit or "unknown",
     )
-    pages = pages[:6]  # 🔴 limit procedure pages
+    # Adaptive procedure context selection
+    # Avoid assuming useful steps are only at the beginning.
+    if len(pages) <= 10:
+        selected_pages = pages
+
+    elif len(pages) <= 20:
+        # keep continuity
+        selected_pages = pages[:12]
+
+    else:
+        # Long WI-style manuals:
+        # preserve contiguous context
+        # instead of fragmented sampling
+        selected_pages = pages[:16]
+
+    # remove duplicates while preserving order
+    seen = set()
+    pages = []
+
+    for p in selected_pages:
+        if p.num not in seen:
+            pages.append(p)
+            seen.add(p.num)
+
     parts = [prompt] + _build_image_parts(pages)
     logger.info(f"  vision procedure: {variant}, {len(parts)-1} images")
     raw = _call_with_retry(model, parts, DEFAULT_TIMEOUT, f"{variant} proc")
@@ -391,10 +519,31 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
         logger.warning(f"{machine}: Gemini failed — aborting extraction")
         return []
     data = _parse_json(raw, f"{variant} proc")
+
     if not data:
+        logger.warning(f"{variant}: procedure JSON empty/invalid")
         return []
-    steps = data.get("test_steps") or []
-    return steps if isinstance(steps, list) else []
+
+    # Accept common response shapes safely
+    steps = (
+        data.get("test_steps")
+        or data.get("steps")
+        or data.get("procedure")
+        or []
+    )
+
+    if not isinstance(steps, list):
+        logger.warning(
+            f"{variant}: unexpected procedure schema "
+            f"keys={list(data.keys())}"
+        )
+        return []
+
+    logger.info(
+        f"{variant}: ALL extracted steps = {steps}"
+    )
+
+    return steps
 
 
 _SPEC_FIELDS = [
@@ -429,13 +578,26 @@ def _normalize_step(raw: Dict) -> Optional[TestStep]:
         return None
 
     settings = raw.get("settings") or []
-    settings = [str(x) for x in settings if x][:3] if isinstance(settings, list) else []
+
+    # preserve all extracted settings
+    # DIP switches frequently exceed 3 entries
+    settings = (
+        [str(x).strip() for x in settings if x]
+        if isinstance(settings, list)
+        else []
+    )
 
     voltages_pn = raw.get("voltages_pn") or []
     voltages_pn = [str(x) for x in voltages_pn][:3] if isinstance(voltages_pn, list) else []
 
     leds = raw.get("leds") or []
-    leds = [str(x) for x in leds if x][:4] if isinstance(leds, list) else []
+
+    # preserve all extracted LEDs
+    leds = (
+        [str(x).strip() for x in leds if x]
+        if isinstance(leds, list)
+        else []
+    )
 
     return TestStep(
         step_name=str(name).strip(),
@@ -479,14 +641,14 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
     if not spec_pages:
         # fallback using classifier (any variant)
         cls = _classify_pages_for_variant(block, variants[0])
-        spec_pages = cls["spec"]
+        spec_pages = cls["spec_pages"]
 
     proc_pages_per_variant: Dict[str, List[Page]] = {}
 
     for v in variants:
         cls = _classify_pages_for_variant(block, v)
 
-        proc_pages_per_variant[v] = cls["proc"]
+        proc_pages_per_variant[v] = cls["proc_pages"]
 
     logger.info(f"{block.machine}: spec_pages={len(spec_pages)} variants={len(variants)}")
 
@@ -524,8 +686,7 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
         ])
 
         if not valid_voltage_specs:
-            logger.warning(f"{v}: skipping procedure extraction due to missing specs")
-            continue
+            logger.warning(f"{v}: specs incomplete — continuing procedure extraction")
         
         # 🔴 Phase 4: store raw vision specs for validation
         variant_raw = raw_specs.get(v_key, {}) if isinstance(raw_specs, dict) else {}
@@ -550,6 +711,23 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
         vd.raw_specs = variant_raw
 
         out[v] = vd
+
+        logger.info(
+            f"[EXTRACTION_RESULT] "
+            f"machine={block.machine} "
+            f"variants={list(out.keys())}"
+        )
+
+        for k, v in out.items():
+            logger.info(
+                f"[VARIANT_SUMMARY] "
+                f"{k} "
+                f"steps={len(v.test_steps)} "
+                f"flags={len(v.specs.flags)} "
+                f"ref_voltage={v.specs.ref_voltage} "
+                f"uv={v.specs.uv_range} "
+                f"ov={v.specs.ov_range}"
+            )
 
     return out
 

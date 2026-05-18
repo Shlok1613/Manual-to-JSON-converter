@@ -1,0 +1,25 @@
+{
+  "extraction_id": "ext_0e589b72",
+  "original_filename": "WI.pdf",
+  "saved_as": "ext_0e589b72_WI.pdf",
+  "num_pages": 62,
+  "num_machines": 1,
+  "machines": [
+    "MAG03D0426"
+  ],
+  "machine_summary": [
+    {
+      "machine": "MAG03D0426",
+      "status": "no_usable_data",
+      "variants": [
+        "MAG03D0426"
+      ]
+    }
+  ],
+  "excel_files": [],
+  "user_input": {
+    "MAG03D0426": []
+  },
+  "status": "no_output",
+  "timestamp": "2026-05-18T09:21:34.919586"
+}
