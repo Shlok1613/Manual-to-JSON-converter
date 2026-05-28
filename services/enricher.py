@@ -53,27 +53,6 @@ def _find_delay(text: str):
     return val
 
 
-def _normalize_voltages(step):
-    # Ensure exactly 3 phases
-    if len(step.voltages_pn) == 1:
-        v = step.voltages_pn[0]
-        step.voltages_pn = [v, v, v]
-    elif len(step.voltages_pn) == 2:
-        step.voltages_pn.append(step.voltages_pn[-1])
-
-
-def _normalize_leds(step):
-    expected = ["PWR", "UV", "OV", "ASY"]
-    existing = step.leds or []
-
-    fixed = []
-    for e in expected:
-        found = next((l for l in existing if e in l.upper()), None)
-        fixed.append(found if found else f"{e}: UNKNOWN")
-
-    step.leds = fixed
-
-
 def enrich_variant(vd: VariantData, block_text: str) -> VariantData:
 
     # -------- SPECS PATCH --------
@@ -100,25 +79,16 @@ def enrich_variant(vd: VariantData, block_text: str) -> VariantData:
             vd.specs.ov_range = f"{ranges[1][0]}-{ranges[1][1]} VAC"
 
     # -------- STEPS NORMALIZATION --------
+    # Only apply delay enrichment from block text if the block is small/targeted.
+    # For SCOPE documents, block_text is the entire 62-page combined text —
+    # _find_delay() would grab a random delay from an unrelated section.
     for step in vd.test_steps:
-        if not step.on_delay:
+        if not step.on_delay and len(block_text) < 8000:
             d = _find_delay(block_text)
             if d:
                 step.on_delay = d
 
-    # -------- DIP SWITCH (FINAL BUILD — AFTER ALL EXTRACTION) --------
-    dip = []
-
-    if vd.specs.uv_range:
-        dip.append(f"UV: {vd.specs.uv_range}")
-
-    if vd.specs.ov_range:
-        dip.append(f"OV: {vd.specs.ov_range}")
-
-    if vd.specs.on_delay:
-        dip.append(f"ON_DELAY: {vd.specs.on_delay}")
-
     # DO NOT fabricate DIP switches
     pass
 
-    return vd
+    return vd

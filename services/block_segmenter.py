@@ -46,10 +46,11 @@ MACHINE_NAME_PATTERN = re.compile(
     r"\b(?:"
     r"SM\d+(?:_[A-Z0-9]+)?|"
     r"DMS\d+(?:_[A-Z0-9]+)?|"
-    r"DSMR|"
+    r"DSMR|SPPR|"
     r"MAG\d+[A-Z0-9]+|"
     r"MAC\d+[A-Z0-9]+|"
-    r"MG[A-Z0-9]{3,}"
+    r"MG[A-Z0-9]{3,}|"
+    r"[A-Z]{2,6}\d+[A-Z0-9_]*"
     r")\b",
     re.IGNORECASE,
 )
@@ -60,7 +61,25 @@ def _find_machine_name(text: str, fallback: str = "UNKNOWN") -> str:
     matches = MACHINE_NAME_PATTERN.findall(text.upper())
 
     if not matches:
+        # Second-pass heuristic: look for most-repeated ALL_CAPS token (3+ chars)
+        COMMON_WORDS = {
+            "THE", "AND", "FOR", "WITH", "FROM", "THIS", "THAT", "NOT", "ARE",
+            "WAS", "HAS", "HAD", "WILL", "CAN", "ALL", "BUT", "THEY", "BEEN",
+            "HAVE", "EACH", "WHICH", "THEIR", "SAID", "USE", "USED",
+            "VOLTAGE", "CURRENT", "PROCESS", "FUNCTIONAL", "SETTING", "SETTINGS",
+            "TABLE", "PHASE", "THRESHOLD", "PROCEDURE", "TESTING", "TEST",
+            "HEALTHY", "FAULT", "DELAY", "STATUS", "LED", "RELAY", "CONDITION",
+            "OFF", "DIP", "SWITCH", "SWITCHES", "CHECK", "POINT", "STEP",
+            "REFER", "NOTE", "PAGE", "DOCUMENT", "SCOPE", "REV", "DATE",
+        }
+        tokens = re.findall(r"\b([A-Z]{3,})\b", text.upper())
+        token_counts = Counter(t for t in tokens if t not in COMMON_WORDS)
+        if token_counts:
+            best_token, best_count = token_counts.most_common(1)[0]
+            if best_count >= 2:
+                return best_token
         return fallback
+
     counts = Counter(matches)
 
     # prefer frequent + well-structured tokens
@@ -125,7 +144,7 @@ def segment_blocks(pages: List[Page], user_names: Optional[List[str]] = None) ->
         machines = list(dict.fromkeys(m.upper() for m in machines))
 
         # Only trigger if multiple machines found → real SCOPE doc
-        if len(machines) >= 5:
+        if len(machines) >= 2:
             logger.info(f"SCOPE detected (early): {machines}")
 
             early_pages = pages

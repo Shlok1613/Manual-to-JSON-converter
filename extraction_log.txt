@@ -1,0 +1,29 @@
+2026-05-25 00:47:01,932 - INFO - Extracting: WI.pdf
+2026-05-25 00:47:01,933 - INFO -   format: real PDF
+2026-05-25 00:47:11,156 - INFO - SCOPE detected (early): ['MAG03D0424', 'MAG03D0425', 'MAG03D0426', 'MAG03D0427', 'MAG03D0428']
+2026-05-25 00:47:12,574 - INFO - [PAGE_CLASSIFICATION] variant=MAG03D0424 spec_pages=[2, 19, 31, 32, 33, 34, 35, 36, 46, 47, 48, 50, 51, 52, 53, 60, 61] proc_pages=[31, 32, 33, 34, 35, 36, 37, 38]
+2026-05-25 00:47:12,574 - INFO - MAG03D0424: spec_pages=4 variants=1
+2026-05-25 00:47:12,576 - INFO - MAG03D0424: full table variants \u2192 ['MAG03D0424', 'MAG03D0425', 'MAG03D0426', 'MAG03D0427', 'MAG03D0428']
+2026-05-25 00:47:12,577 - INFO - MAG03D0424: mapped variants from tables \u2192 ['MAG03D0424', 'MAG03D0425', 'MAG03D0426', 'MAG03D0427', 'MAG03D0428']
+2026-05-25 00:47:12,577 - INFO - MAG03D0424: extracted 4 table grids
+2026-05-25 00:47:12,577 - INFO -   vision specs chunk: 4 images, variants=['MAG03D0424']
+2026-05-25 00:47:13,503 - WARNING -   [MAG03D0424 specs] 429 — retry 1/3 in 15s
+2026-05-25 00:47:46,910 - INFO - MAG03D0424: raw spec response keys=['MAG03D0424']
+2026-05-25 00:47:46,910 - INFO - MAG03D0424: raw spec payload={'MAG03D0424': {'ref_voltage': None, 'uv_range': None, 'uv_threshold_pct': None, 'ov_range': None, 'ov_threshold_pct': None, 'uv_hysteresis': None, 'ov_hysteresis': None, 'asymmetry': None, 'on_delay': None, 'off_delay': None, 'phase_fail': None, 'phase_reverse': None, 'neutral_fail': None, 'virtual_neutral': None, 'lv_cutoff': None, 'hv_cutoff': None, 'voltage_unit': None, 'led_indications': {}, 'dip_switches': [], 'notes': None}}
+2026-05-25 00:47:46,910 - WARNING - MAG03D0424: specs incomplete — continuing procedure extraction
+2026-05-25 00:47:46,911 - INFO -   vision procedure: MAG03D0424, 8 images
+2026-05-25 00:47:47,689 - WARNING -   [MAG03D0424 proc] 429 — retry 1/3 in 15s
+2026-05-25 00:48:03,533 - WARNING -   [MAG03D0424 proc] 429 — retry 2/3 in 30s
+2026-05-25 00:48:34,334 - WARNING -   [MAG03D0424 proc] 429 — retry 3/3 in 60s
+2026-05-25 00:49:35,374 - INFO -   [MAG03D0424 proc] call failed: ResourceExhausted: ResourceExhausted('You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\nPlease retry in 21.103845434s.')
+2026-05-25 00:49:35,374 - WARNING - MAG03D0424: Gemini failed — aborting extraction
+2026-05-25 00:49:35,374 - INFO - [EXTRACTION_RESULT] machine=MAG03D0424 variants=['MAG03D0424']
+2026-05-25 00:49:35,374 - INFO - [VARIANT_SUMMARY] MAG03D0424 steps=0 flags=0 ref_voltage=None uv=None ov=None
+2026-05-25 00:49:40,378 - WARNING -   MAG03D0424: 2 spec flag(s)
+2026-05-25 00:49:40,378 - WARNING -     - missing voltage_unit
+2026-05-25 00:49:40,378 - WARNING -     - no voltage ranges extracted
+
+--- MAG03D0424 ---
+  MAG03D0424: steps=0, usable=False
+
+DONE

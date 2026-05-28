@@ -205,16 +205,14 @@ async def extract_pdf(
 
             if not sub_machines:
                 logger.warning(f"{machine_name}: user variants invalid → falling back to auto-detect")
-                MAX_VARIANTS = 2  # 🔴 HARD LIMIT (production-safe)
 
                 sub_machines = [
                     v for v in detected_variants
-                    if re.match(r"^[A-Z]{2,6}\d+[A-Z0-9_]*$", v)
+                    if re.match(r"^[A-Z0-9][A-Z0-9_]*$", v) and len(v) >= 3 and re.search(r"[A-Z]", v)
                 ][:8]
         else:
-            MAX_VARIANTS = 2
             sub_machines = [v for v in detected_variants
-                if re.match(r"^[A-Z]{2,6}\d+[A-Z0-9_]*$", v)
+                if re.match(r"^[A-Z0-9][A-Z0-9_]*$", v) and len(v) >= 3 and re.search(r"[A-Z]", v)
             ][:8]
 
         if sub_machines:

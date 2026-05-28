@@ -4,3 +4,11 @@ __pycache__/
 .env
 uploads/
 outputs/
+source/
+TEST_RESULTS.md
+tests/
+Architecture.md
+Bug_Log.md
+Design_decisions.md
+Current_Status.md
+Rule.md

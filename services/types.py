@@ -53,7 +53,7 @@ class TestStep:
     step_name: str
     settings: List[str] = field(default_factory=list)
     voltages_pn: List[str] = field(default_factory=list)
-    voltage_pp: Optional[str] = None
+    voltage_pp: List[str] = field(default_factory=list)
     leds: List[str] = field(default_factory=list)
     relay_status: Optional[str] = None
     on_delay: Optional[str] = None
