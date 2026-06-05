@@ -135,7 +135,7 @@ LAYOUT_B = {
 }
 
 
-def detect_layout(specs: Specs) -> Dict:
+def detect_layout(specs: Specs, test_steps=None) -> Dict:
     has_thresholds = bool(specs.uv_threshold_pct or specs.ov_threshold_pct)
     has_uv_ov = bool(specs.uv_range or specs.ov_range)
     has_cutoffs = bool(specs.lv_cutoff or specs.hv_cutoff)
@@ -150,7 +150,23 @@ def detect_layout(specs: Specs) -> Dict:
         ref_v = float(str(specs.ref_voltage or "0").replace("V", "").replace("VAC", "").strip())
     except (ValueError, TypeError):
         ref_v = 0
-    if ref_v >= 230 and not has_dips and not has_thresholds:
+    
+    # If specs are all empty, try to infer from test_steps
+    specs_empty = not (has_thresholds or has_uv_ov or has_cutoffs or has_dips or specs.ref_voltage)
+    if specs_empty and test_steps:
+        # Layout A machines have voltage_pp data in steps
+        has_pp_voltages = any(s.voltage_pp and len(s.voltage_pp) > 0 for s in test_steps)
+        if has_pp_voltages:
+            return LAYOUT_A
+        # Layout A machines also have multiple voltage entries
+        has_multi_voltage = any(
+            s.voltages_pn and len(s.voltages_pn) >= 3
+            for s in test_steps
+        )
+        if has_multi_voltage:
+            return LAYOUT_A
+    
+    if ref_v >= 230 and not has_dips and not has_thresholds and not has_uv_ov:
         return LAYOUT_B
 
     return LAYOUT_A
@@ -276,7 +292,7 @@ def _apply_widths(ws, layout: Dict) -> None:
 # ---------- public API ---------------------------------------------------
 
 def _write_variant_sheet(ws, variant: VariantData) -> Dict:
-    layout = detect_layout(variant.specs)
+    layout = detect_layout(variant.specs, test_steps=variant.test_steps)
 
     if layout["has_dip_block"]:
         _write_header_a(ws, variant.specs, layout)

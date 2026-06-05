@@ -122,14 +122,13 @@ def _parse_json(raw: Optional[str], label: str) -> Optional[Dict]:
 
 def _strip_repeated_header_lines(text: str, all_pages: List[Page]) -> str:
     """
-    Remove lines that appear on ≥50% of all pages in the block.
+    Remove lines that appear on >=50% of all pages in the block.
     These are document-level headers/footers (e.g., SCOPE lines, page titles)
     that would cause false positive variant matches on every page.
     """
     if not all_pages:
         return text
 
-    # Build a frequency map of normalized lines across all pages
     from collections import Counter
     line_freq = Counter()
     total_pages = len(all_pages)
@@ -137,19 +136,17 @@ def _strip_repeated_header_lines(text: str, all_pages: List[Page]) -> str:
         page_lines = set()
         for line in (p.ocr_text or "").splitlines():
             stripped = line.strip()
-            if stripped and len(stripped) > 10:  # skip trivially short lines
+            if stripped and len(stripped) > 10:
                 page_lines.add(stripped)
         for line in page_lines:
             line_freq[line] += 1
 
-    # Lines appearing on ≥50% of pages are repeated headers
     threshold = max(2, total_pages * 0.5)
     repeated = {line for line, count in line_freq.items() if count >= threshold}
 
     if not repeated:
         return text
 
-    # Strip those lines from the input text
     filtered = []
     for line in text.splitlines():
         if line.strip() not in repeated:
@@ -166,9 +163,7 @@ def _find_exclusive_anchor(
 ) -> "Optional[int]":
     """
     Find the page most exclusively dedicated to this variant.
-    Score = (mentions of this variant in body) - (mentions of all other known variants in body).
-    Requires at least one test-content keyword in the body.
-    'Body' = page text with repeated document-level header lines stripped.
+    Score = (mentions of this variant) - (mentions of all other known variants).
     """
     TEST_CONTENT_RE = re.compile(
         r"healthy\s+condition|faulty\s+condition|"
@@ -204,7 +199,6 @@ def _find_exclusive_anchor(
         )
         score = target_count - other_count
 
-        # Bonus for explicit section headers like "PROCEDURE FOR CAT ID : MAG03D0427"
         if variant_name and re.search(
             rf"PROCEDURE\s+FOR\s+.*{re.escape(variant_name)}", body, re.IGNORECASE
         ):
@@ -218,11 +212,6 @@ def _find_exclusive_anchor(
 
 
 def _detect_all_machine_names_in_block(block: Block) -> List[str]:
-    """
-    Detect all machine/variant names mentioned in the block text.
-    Used for exclusivity scoring — we need to know what OTHER machines exist.
-    """
-    # Look for SCOPE line first
     scope_m = re.search(r"SCOPE\s*:\s*([\w/\s,]+)", block.text or "", re.IGNORECASE)
     if scope_m:
         names = re.findall(
@@ -233,7 +222,6 @@ def _detect_all_machine_names_in_block(block: Block) -> List[str]:
         if names:
             return list(dict.fromkeys(n.upper() for n in names))
 
-    # Fallback: find all machine-like tokens
     names = re.findall(
         r"\b([A-Z]{2,6}\d+[A-Z0-9]*)\b",
         block.text or "",
@@ -241,12 +229,10 @@ def _detect_all_machine_names_in_block(block: Block) -> List[str]:
     )
     from collections import Counter
     counts = Counter(n.upper() for n in names)
-    # Return tokens appearing at least 3 times (likely real machine names)
     return [n for n, c in counts.most_common(20) if c >= 3 and len(n) >= 6]
 
 
 def _classify_pages(block: Block) -> Dict[str, List[Page]]:
-    """Pick spec-table pages and procedure pages from a block via cheap regex."""
     spec_pages: List[Page] = []
     proc_pages: List[Page] = []
 
@@ -267,9 +253,7 @@ def _classify_pages(block: Block) -> Dict[str, List[Page]]:
             continue
         if spec_re.search(p.ocr_text):
             spec_pages.append(p)
-        # Detect procedure start
         is_proc = proc_re.search(p.ocr_text)
-        # Detect continuation — require structured step numbering, not any digit+period
         has_steps = bool(re.search(r"^\s*\d+\.\s+[A-Z]", p.ocr_text, re.MULTILINE))
         has_dip = "DIP" in p.ocr_text.upper()
 
@@ -277,10 +261,7 @@ def _classify_pages(block: Block) -> Dict[str, List[Page]]:
             proc_pages.append(p)
 
     if not spec_pages:
-        spec_pages = [
-            p for p in block.pages
-            if p.jpeg_bytes is not None
-        ][:4]
+        spec_pages = [p for p in block.pages if p.jpeg_bytes is not None][:4]
 
     if not proc_pages:
         proc_pages = [
@@ -292,11 +273,6 @@ def _classify_pages(block: Block) -> Dict[str, List[Page]]:
 
 
 def _classify_pages_for_variant(block: Block, variant: str) -> Dict[str, List[Page]]:
-    """
-    Variant-aware classification.
-    Keeps common spec pages, but narrows procedure pages.
-    """
-
     spec_pages = []
     proc_pages = []
 
@@ -323,7 +299,6 @@ def _classify_pages_for_variant(block: Block, variant: str) -> Dict[str, List[Pa
         re.IGNORECASE,
     )
 
-    # Collect spec pages (shared across variants)
     for p in block.pages:
         if not p.jpeg_bytes:
             continue
@@ -331,33 +306,25 @@ def _classify_pages_for_variant(block: Block, variant: str) -> Dict[str, List[Pa
         if spec_re.search(text):
             spec_pages.append(p)
 
-    # For large documents (SCOPE-like), always use exclusivity-scored anchor.
-    # The first-pass variant filtering is useless when SCOPE header is on every page.
     is_large_block = len(block.pages) > 20
 
     if not is_large_block:
-        # Small/medium blocks: first-pass variant-filtered procedure pages
         for p in block.pages:
             if not p.jpeg_bytes:
                 continue
             text = p.ocr_text or ""
             has_proc_marker = proc_re.search(text)
-            has_step_pattern = bool(
-                re.search(r"^\s*\d+\.\s+[A-Z]", text, re.MULTILINE)
-            )
-            if (has_proc_marker or has_step_pattern):
-                # Use header-stripped text for variant matching
+            has_step_pattern = bool(re.search(r"^\s*\d+\.\s+[A-Z]", text, re.MULTILINE))
+            if has_proc_marker or has_step_pattern:
                 body = _strip_repeated_header_lines(text, block.pages)
                 if variant_re.search(body):
                     proc_pages.append(p)
 
-    # Anchor-based page selection: find the page most dedicated to this variant
     if len(proc_pages) < 3:
         all_proc = [
             p for p in block.pages
             if p.jpeg_bytes and proc_re.search(p.ocr_text or "")
         ]
-        # Collect all known machine names from the block for exclusivity scoring
         all_machine_names = _detect_all_machine_names_in_block(block)
         all_machine_names_excl = [m for m in all_machine_names if m.upper() != variant_clean]
 
@@ -366,11 +333,8 @@ def _classify_pages_for_variant(block: Block, variant: str) -> Dict[str, List[Pa
             variant_name=variant_clean,
         )
         if anchor_idx is not None:
-            # Take a wider window from anchor, but STOP when we hit
-            # another variant's procedure heading.
             start = max(0, anchor_idx - 1)
             candidate = all_proc[start: start + 10]
-            # Detect headings for OTHER variants to stop page collection
             other_proc_heading_re = re.compile(
                 r"FUNCTIONAL\s+TEST\s+PROCEDURE\s+FOR\s+(?!.*" + re.escape(variant_clean) + r")",
                 re.IGNORECASE,
@@ -390,14 +354,12 @@ def _classify_pages_for_variant(block: Block, variant: str) -> Dict[str, List[Pa
         else:
             proc_pages = all_proc[:MAX_IMAGES_PER_CALL]
 
-    # Final fallback
     if not proc_pages:
         proc_pages = [
             p for p in block.pages
             if p.jpeg_bytes and proc_re.search(p.ocr_text or "")
         ][:MAX_IMAGES_PER_CALL]
 
-    # 🔴 fallback spec
     if not spec_pages:
         spec_pages = [p for p in block.pages if p.jpeg_bytes][:6]
 
@@ -517,7 +479,7 @@ EXPECTED STEP SEQUENCE for Section A (UV tests):
 For Section B (OV tests):
   1. "DIP S/W Change"
   2. "OV Healthy condition" — set voltage to the LOWER BOUND OF THE OV RECOVERY RANGE
-     (from the example in the document: "if trip is T then recovery is A to B" → use min(A,B))
+     (from the example in the document: "if trip is T then recovery is A to B" -> use min(A,B))
      Convert Ph-Ph to Ph-N by dividing by 1.732 if the document specifies Ph-Ph.
      This is LOWER than the OV trip range lower bound.
      NOTE: Section B does NOT start with a generic "healthy condition" — it goes straight to "OV Healthy condition".
@@ -550,36 +512,36 @@ If you get more than 30 steps, you are likely duplicating.
 SECTION MARKERS:
 - "Supply couple at [voltage] VAC" — when procedure changes voltage for symmetrical tests.
   Replace [voltage] with actual value, e.g. "Supply couple at 100 VAC" for 100V.
-  → section_break: true, no voltages, no LEDs
+  -> section_break: true, no voltages, no LEDs
 - "Supply OFF" — when procedure says "Turn OFF 3 ph test Jig" before DIP change
-  → section_break: true
+  -> section_break: true
 - "Supply OFF change voltages as follows before supply ON" — before new DIP config
-  → section_break: true
+  -> section_break: true
 
 VOLTAGE RULES:
-- Nominal: "set voltage at 120V" → RN:120, YN:120, BN:120
-- UV Healthy: use UPPER BOUND of trip range (e.g. 109.2-111.6 → 111.6)
-- UV Faulty: use LOWER BOUND of trip range (e.g. 109.2-111.6 → 109.2)
+- Nominal: "set voltage at 120V" -> RN:120, YN:120, BN:120
+- UV Healthy: use UPPER BOUND of trip range (e.g. 109.2-111.6 -> 111.6)
+- UV Faulty: use LOWER BOUND of trip range (e.g. 109.2-111.6 -> 109.2)
 - Hystersis not recovery: use the EXAMPLE trip value ("if trip is 110.4V then...")
 - Hystersis recovery: recovery voltage = example_trip + upper_hystersis.
-  E.g. trip=110.4, hystersis range=1.2-3.6 → recovery = 110.4 + (3.6 + 1.2) = 115.2
+  E.g. trip=110.4, hystersis range=1.2-3.6 -> recovery = 110.4 + (3.6 + 1.2) = 115.2
 - Symmetrical UV test: document says "reduce all phases to X V Ph-N" or "supply couple at X VAC". X is the LOWER base voltage (e.g. 100V Ph-N). FORBIDDEN: never use 277V, 480V, or any OV section voltage for UV symmetrical steps.
   Example: doc says "reduce all phases to 100V Ph-N", UV trip range=92.4 to 94.8V, hysteresis=1.2 to 3.6V:
     UV symmmetrical Healthy: all phases 94.8V (UPPER bound of trip range at 100V base)
     UV symmmetrical faulty: all phases 92.4V (LOWER bound of trip range at 100V base)
     UV hystersis recovery (sym): all phases = upper_trip + upper_hysteresis = 94.8 + 3.6 = 98.4V
-- Ph-N: "120V" → RN:120. Ph-Ph: "480V Ph-Ph (277V Ph-N)" → voltages_pn=[RN:277,...], voltage_pp=[RY:480,...]
+- Ph-N: "120V" -> RN:120. Ph-Ph: "480V Ph-Ph (277V Ph-N)" -> voltages_pn=[RN:277,...], voltage_pp=[RY:480,...]
 - Only the tested phase changes. Other phases keep nominal.
 - Phase reverse: add "(change phase angle)" as 4th voltage_pn entry
 - Phase reverse recovery: add "(recover phase angle)" as 4th voltage_pn entry
 
 DIP SWITCH EXTRACTION:
-- From table: "1 2 3 | 0 0 0 (OFF)" → ["1 : OFF", "2 : OFF", "3 : OFF"]
+- From table: "1 2 3 | 0 0 0 (OFF)" -> ["1 : OFF", "2 : OFF", "3 : OFF"]
 - Setting "0" = OFF, "1" = ON
 - These go in settings of the "DIP S/W Change" step
 
 POT SETTINGS per step:
-- From "Pot Settings: UV pot – 8%, OV pot – 22%, Delay Pot – 3 sec"
+- From "Pot Settings: UV pot - 8%, OV pot - 22%, Delay Pot - 3 sec"
 - Return as: ["UV = 8%", "OV = 22%", "DELAY = 3SEC"]
 - IMPORTANT: Re-read pot settings for each section. They change between sections
   and between non-symmetrical and symmetrical parts of the same section.
@@ -592,9 +554,9 @@ Always include ALL LEDs for the layout. Adjust ON/OFF/BLINKING per condition.
 WORKED EXAMPLE — Section A says:
   "DIP S/W: 1=0 2=0 3=0 4=0 5=1, Pot: UV=8% OV=22% Delay=3sec"
   "set voltage at 120V Ph-N"
-  "Turn ON → PWR LED ON, relay ON after 5 sec"
-  "Reduce R phase → UV LED ON. After 3 sec, relay trips. Trip range: 109.2V to 111.6V"
-  "Increase R phase → UV LED OFF. After 5 sec, relay ON. Hysteresis: 1.2V to 3.6V"
+  "Turn ON -> PWR LED ON, relay ON after 5 sec"
+  "Reduce R phase -> UV LED ON. After 3 sec, relay trips. Trip range: 109.2V to 111.6V"
+  "Increase R phase -> UV LED OFF. After 5 sec, relay ON. Hysteresis: 1.2V to 3.6V"
   "If trip voltage is 110.4V then reset hysteresis should be 111.6V to 114V"
 
 This produces these steps:
@@ -637,12 +599,11 @@ IMPORTANT:
 - Steps with NO test conditions (DIP S/W Change, Supply couple at X VAC, Supply OFF (exact), Supply OFF change voltages..., Run time DIP switch change error) MUST have voltages_pn=[], voltage_pp=[], leds=[], relay_status=null, on_delay=null, off_delay=null.
 - Steps WITH test conditions must have voltages_pn and leds filled from the document.
 - section_break RULES (exact):
-    TRUE  → DIP S/W Change, Supply couple at X VAC, Supply OFF (exact), Supply OFF change voltages as follows before supply ON
-    TRUE  → OV hystersis recovery (Section B only), Asymmetry recovery, Phase recovery
-    FALSE → ALL other steps including BOTH occurrences of UV hystersis recovery
+    TRUE  -> DIP S/W Change, Supply couple at X VAC, Supply OFF (exact), Supply OFF change voltages as follows before supply ON
+    TRUE  -> OV hystersis recovery (Section B only), Asymmetry recovery, Phase recovery
+    FALSE -> ALL other steps including BOTH occurrences of UV hystersis recovery
 - No markdown. No explanation. No commentary.
 """
-
 
 
 def _build_image_parts(pages: List[Page]) -> list:
@@ -651,6 +612,7 @@ def _build_image_parts(pages: List[Page]) -> list:
         if p.jpeg_bytes:
             parts.append({"mime_type": "image/jpeg", "data": p.jpeg_bytes})
     return parts
+
 
 def _chunk_pages(pages: List[Page], size: int = 10):
     for i in range(0, len(pages), size):
@@ -666,14 +628,10 @@ def _extract_specs(genai, machine: str, variants: List[str], pages: List[Page]) 
 
     all_data = {}
 
-    # 🔴 HARD LIMIT pages for free tier
-    # Keep broader spec context for WI-style manuals
     if len(pages) <= 8:
         selected_pages = pages
-
     elif len(pages) <= 20:
         selected_pages = pages[:10]
-
     else:
         selected_pages = pages[:12]
 
@@ -692,9 +650,7 @@ def _extract_specs(genai, machine: str, variants: List[str], pages: List[Page]) 
             f"{machine}: raw spec response keys="
             f"{list(data.keys()) if isinstance(data, dict) else 'invalid'}"
         )
-        logger.info(
-            f"{machine}: raw spec payload={data}"
-        )
+        logger.info(f"{machine}: raw spec payload={data}")
 
         if data:
             cleaned = {
@@ -717,7 +673,6 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
     if not pages:
         return []
     model = genai.GenerativeModel(VISION_MODEL)
-    # Detect layout type for the prompt
     has_cutoffs = bool(specs.lv_cutoff or specs.hv_cutoff)
     has_thresholds = bool(specs.uv_threshold_pct or specs.ov_threshold_pct)
     has_uv_ov = bool(specs.uv_range or specs.ov_range)
@@ -729,22 +684,14 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
         variant=variant,
         layout_type=layout_type,
     )
-    # Adaptive procedure context selection
-    # Avoid assuming useful steps are only at the beginning.
+
     if len(pages) <= 10:
         selected_pages = pages
-
     elif len(pages) <= 20:
-        # keep continuity
         selected_pages = pages[:12]
-
     else:
-        # Long WI-style manuals:
-        # preserve contiguous context
-        # instead of fragmented sampling
         selected_pages = pages[:16]
 
-    # remove duplicates while preserving order
     seen = set()
     deduped = []
     for p in selected_pages:
@@ -752,8 +699,6 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
             deduped.append(p)
             seen.add(p.num)
 
-    # For tabular PDFs where procedure steps say "check as per table":
-    # prepend spec table pages so Gemini can read both table and procedure.
     if spec_pages and len(deduped) <= 4:
         spec_ctx = [p for p in spec_pages[:3] if p.jpeg_bytes and p.num not in seen]
         pages = spec_ctx + deduped
@@ -773,7 +718,6 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
         logger.warning(f"{variant}: procedure JSON empty/invalid")
         return []
 
-    # Accept common response shapes safely
     steps = (
         data.get("test_steps")
         or data.get("steps")
@@ -782,18 +726,11 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
     )
 
     if not isinstance(steps, list):
-        logger.warning(
-            f"{variant}: unexpected procedure schema "
-            f"keys={list(data.keys())}"
-        )
+        logger.warning(f"{variant}: unexpected procedure schema keys={list(data.keys())}")
         return []
 
-    logger.info(
-        f"{variant}: ALL extracted steps = {steps}"
-    )
+    logger.info(f"{variant}: ALL extracted steps = {steps}")
 
-    # Post-process: filter out unwanted section labels Gemini may invent
-    # These are test-type headers from the procedure document, not real steps
     _BAD_LABEL_RE = re.compile(
         r"^(?:Under|Over)\s+Voltage|"
         r"^Phase\s+(?:asymmetry|fail)\s+(?:and|functionality)|"
@@ -806,72 +743,57 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
     filtered = []
     for s in steps:
         name = s.get("step_name", "")
-        # Keep DIP S/W Change steps
         if "DIP S/W" in name and "Change" in name:
             filtered.append(s)
             continue
-        # Keep known section labels
         if name.lower().startswith(("supply ", "dip s/w")):
             filtered.append(s)
             continue
-        # Filter out test-type headers
         if _BAD_LABEL_RE.search(name):
             logger.debug(f"  filtering out section label: {name}")
             continue
-        # Keep everything else
         filtered.append(s)
 
     if len(filtered) < len(steps):
-        logger.info(f"{variant}: filtered {len(steps)-len(filtered)} section labels → {len(filtered)} steps")
+        logger.info(f"{variant}: filtered {len(steps)-len(filtered)} section labels -> {len(filtered)} steps")
 
-    # Normalize step names to match reference spelling conventions
+    # Normalize step names
     for s in filtered:
         name = s.get("step_name", "")
         if not name:
             continue
-        # Reference uses "symmmetrical" (3 m's) — match this typo
         name = re.sub(r'\bsymmetrical\b', 'symmmetrical', name, flags=re.IGNORECASE)
-        # Remove "(symmetrical)" suffix — reference doesn't use it
         name = re.sub(r'\s*\(symmetrical\)\s*$', '', name, flags=re.IGNORECASE)
-        # Reference uses "hystersis" not "hysteresis"
         name = re.sub(r'\bhysteresis\b', 'hystersis', name, flags=re.IGNORECASE)
-        # OV uses "OV faulty condition" not "OV faulty condition with delay"
         if name.lower().startswith("ov faulty condition with delay"):
             name = name.replace("with delay", "").strip()
-        # Clean up "Supply couple at X VAC Ph-N" → "Supply couple at X VAC"
         name = re.sub(r'\s+Ph-[NP].*$', '', name, flags=re.IGNORECASE)
         s["step_name"] = name
 
-    # Normalize LED states generically — verbose blink descriptions → "BLINKING"
+    # Normalize LED states
     for s in filtered:
         leds = s.get("leds", [])
         if not leds:
             continue
         normalized_leds = []
         for led in leds:
-            # Normalize verbose blink patterns to "BLINKING"
-            # e.g. "Fast Blink (200ms ON & 200ms OFF)" → "BLINKING"
-            # e.g. "Slow Blink (1s ON & 1s OFF)" → "BLINKING"
-            led = re.sub(r'(?:Fast|Slow)\s+Blink\s*\([^)]*\)', 'BLINKING', led, flags=re.IGNORECASE)
-            # Also handle plain "Blinking" → "BLINKING"
+            led = re.sub(r'(?:Fast|Slow)?\s*Blink(?:ing)?\s*\([^)]*\)', 'BLINKING', led, flags=re.IGNORECASE)
             led = re.sub(r'\bBlinking\b', 'BLINKING', led, flags=re.IGNORECASE)
-            # ASY BLINKING: reference uses "ASY : BLINKING" (no color label)
-            # but "ASY (RED LED): OFF" for static states
-            if 'ASY' in led.upper() and 'BLINKING' in led.upper():
-                led = re.sub(r'ASY\s*\([^)]*\)\s*:', 'ASY :', led, flags=re.IGNORECASE)
+            # Strip any parenthetical after BLINKING: "BLINKING (1s ON & 1s OFF)" → "BLINKING"
+            led = re.sub(r'BLINKING\s*\([^)]*\)', 'BLINKING', led)
+            # When BLINKING: strip color label from ASY and PWR
+            # Reference: "ASY : BLINKING" and "PWR : BLINKING" (no color suffix)
+            # Reference: "ASY (RED LED): OFF" and "PWR (GREEN LED) : ON" (with color suffix)
+            if 'BLINKING' in led.upper():
+                led = re.sub(r'(ASY)\s*\([^)]*\)\s*:', r'\1 :', led, flags=re.IGNORECASE)
+                led = re.sub(r'(PWR)\s*\([^)]*\)\s*:', r'\1 :', led, flags=re.IGNORECASE)
             normalized_leds.append(led)
         s["leds"] = normalized_leds
 
-    # ── Generic OCR-driven post-processing ──────────────────────────────────
-    # Parse values from OCR page-by-page. Only override Gemini's extraction
-    # when OCR confirms a better value. NO hardcoded defaults.
-
-    # 1. Find OV voltage levels from Section B OCR
-    #    OV values are at Ph-Ph scale (>350V) in the document. UV values are at Ph-N scale (<200V).
-    #    We search for ALL reset hysteresis matches and only use the Ph-Ph ones.
-    ov_base = None       # lower recovery bound in Ph-N (used for OV Healthy + not-recovery)
-    ov_fault_v = None    # lower trip bound in Ph-N (used for OV faulty)
-    ov_recovery = None   # recovery level in Ph-N (ov_base − 5 approx)
+    # OCR-driven post-processing
+    ov_base = None
+    ov_fault_v = None
+    ov_recovery = None
 
     hyst_re = re.compile(
         r"reset\s+hysteresis\s*(?:voltage\s*)?(?:should\s+be\s*)?(?:in\s+the\s+range\s+of\s*)?(\d+(?:\.\d+)?)\s*V?\s*(?:to|and|-)\s*(\d+(?:\.\d+)?)\s*V",
@@ -884,18 +806,15 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
 
     for p in pages:
         text = p.ocr_text or ""
-        # Find ALL reset hysteresis matches on this page
         if ov_base is None:
             for m in hyst_re.finditer(text):
                 a, b = float(m.group(1)), float(m.group(2))
                 val = min(a, b)
-                # Only accept Ph-Ph scale values (>350V) — these are OV, not UV
                 if val > 350:
                     ov_base = round(val / 1.73205)
                     ov_recovery = ov_base - 5.0
                     break
 
-        # Find ALL trip voltage matches, accept only Ph-Ph scale
         if ov_fault_v is None:
             for m in trip_re.finditer(text):
                 a, b = float(m.group(1)), float(m.group(2))
@@ -907,7 +826,6 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
         if ov_base is not None and ov_fault_v is not None:
             break
 
-    # 2. Parse Section B DIP switch settings from OCR
     sec_b_dips = None
     for p in pages:
         text = p.ocr_text or ""
@@ -925,7 +843,6 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
             ]
             break
 
-    # 3. Parse Run-time DIP switch settings from OCR
     run_time_dips = None
     for p in pages:
         text = p.ocr_text or ""
@@ -943,35 +860,50 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
                 ]
                 break
 
-    # 4. Parse Section B pot settings from OCR (OV pot %, delay)
     sec_b_ov_pct = None
     sec_b_delay = None
     for p in pages:
         text = p.ocr_text or ""
         if re.search(r"B\]\s*Goal|Over\s+Voltage|480V|Ph-Ph", text, re.IGNORECASE):
-            m = re.search(r"OV\s*pot\s*[-–—]\s*(\d+)\s*%", text, re.IGNORECASE)
+            m = re.search(r"OV\s*pot\s*[-\u2013\u2014]\s*(\d+)\s*%", text, re.IGNORECASE)
             if m:
                 sec_b_ov_pct = m.group(1)
-            m = re.search(r"Delay\s*[Pp]ot\s*[-–—]\s*(\d+)\s*sec", text, re.IGNORECASE)
+            m = re.search(r"Delay\s*[Pp]ot\s*[-\u2013\u2014]\s*(\d+)\s*sec", text, re.IGNORECASE)
             if m:
                 sec_b_delay = m.group(1)
             if sec_b_ov_pct:
                 break
 
-    # 5. Apply overrides to filtered steps
+    # 5. Parse Section C/D nominal voltage from OCR
+    #    Look for "C] Goal" section with "at 240V" or "at 240V (415V Ph-Ph)"
+    sec_cd_nominal_ocr = None
+    for p in pages:
+        text = p.ocr_text or ""
+        m_goal = re.search(r"C\]\s*Goal", text, re.IGNORECASE)
+        if m_goal:
+            # Only search text AFTER the C] Goal marker
+            after_c = text[m_goal.end():]
+            m = re.search(r"(?:Neutral\s+at|at)\s+(\d+)\s*V", after_c, re.IGNORECASE)
+            if m:
+                sec_cd_nominal_ocr = float(m.group(1))
+                logger.info(f"  Section C/D nominal from OCR: {sec_cd_nominal_ocr}V Ph-N")
+                break
+
+    # Apply overrides
     processed = []
-    saw_supply_off_change = False  # track "Supply OFF change voltages..." step
+    saw_supply_off_change = False
+    sec_cd_nominal_pn = sec_cd_nominal_ocr  # Pre-fill from OCR; may be overridden by Supply couple step
+    sec_a_nominal_pn = None   # Ph-N nominal for Section A (detected from first healthy step)
     i = 0
     while i < len(filtered):
         s = filtered[i]
         name = s.get("step_name", "")
         name_lower = name.lower().strip()
 
-        # ── Section B DIP fix: mid-test DIP with functional data ───────────
+        # Run time DIP + next DIP S/W block
         if "run time dip" in name_lower and i + 1 < len(filtered):
             next_s = filtered[i + 1]
             if "dip" in next_s.get("step_name", "").lower():
-                # Run time step: keep empty (no voltages/leds per reference)
                 s["voltages_pn"] = []
                 s["voltage_pp"] = []
                 s["leds"] = []
@@ -979,7 +911,6 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
                 s["on_delay"] = None
                 s["section_break"] = False
 
-                # DIP S/W step after run time: carries OV recovery voltages + run-time DIP settings
                 if run_time_dips:
                     next_s["settings"] = run_time_dips
                 if ov_recovery is not None:
@@ -997,14 +928,37 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
                 i += 2
                 continue
 
-        # ── Track "Supply OFF change voltages..." marker ─────────────────
         if "supply off change" in name_lower:
             saw_supply_off_change = True
 
-        # ── Remove spurious steps AFTER "Supply OFF change voltages..." ──
-        # Reference goes: Supply OFF change → Healthy condition (Section C)
-        # Gemini sometimes invents extra "Supply OFF" and/or "DIP S/W" steps.
-        # Skip them until we hit the first actual test step (Healthy condition).
+        # Track Section C/D nominal voltage from Supply couple step (only after Supply OFF change)
+        if saw_supply_off_change and "supply couple" in name_lower:
+            # Try to get nominal from the step's own voltages first (most reliable)
+            sc_vpn = s.get("voltages_pn") or []
+            if sc_vpn:
+                m_scv = re.search(r':\s*([\d.]+)', str(sc_vpn[0]))
+                if m_scv:
+                    sec_cd_nominal_pn = float(m_scv.group(1))
+                    logger.info(f"  Section C/D nominal from Supply couple voltages: {sec_cd_nominal_pn}V Ph-N")
+            # Fallback: parse from step name
+            if sec_cd_nominal_pn is None:
+                m_sc = re.search(r'(\d+)\s*(?:VAC|V)', name, re.IGNORECASE)
+                if m_sc:
+                    pp_v = float(m_sc.group(1))
+                    # If value > 300, it's Ph-Ph — convert to Ph-N
+                    sec_cd_nominal_pn = round(pp_v / 1.73205, 1) if pp_v > 300 else pp_v
+                    logger.info(f"  Section C/D nominal from Supply couple name: {sec_cd_nominal_pn}V Ph-N")
+
+        # Track Section A nominal from first healthy condition step
+        if not saw_supply_off_change and sec_a_nominal_pn is None and name_lower == "healthy condition":
+            vpn_list = s.get("voltages_pn") or []
+            if vpn_list:
+                m_va = re.search(r':\s*([\d.]+)', str(vpn_list[0]))
+                if m_va:
+                    sec_a_nominal_pn = float(m_va.group(1))
+                    logger.info(f"  Section A nominal detected: {sec_a_nominal_pn}V Ph-N")
+
+        # Remove spurious steps after Supply OFF change
         if saw_supply_off_change and "supply off change" not in name_lower:
             is_filler = (
                 name_lower == "supply off"
@@ -1015,16 +969,14 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
                 i += 1
                 continue
 
-        # ── Section B DIP switch settings fix ─────────────────────────────
+        # Section B DIP switch settings
         if "dip s/w" in name_lower and sec_b_dips and not processed:
-            # First DIP step (Section A) — don't touch
             pass
         elif "dip s/w" in name_lower and sec_b_dips:
-            # Mid-test DIP before Section B (not first, not run-time)
             if not any("ov" in ps.get("step_name", "").lower() for ps in processed):
                 s["settings"] = sec_b_dips
 
-        # ── Section B OV voltage overrides (all 3 phases symmetric) ────────
+        # OV voltage overrides
         if ov_base is not None and "ov healthy" in name_lower:
             v = int(round(ov_base))
             pp = int(round(ov_base * 1.73205))
@@ -1032,10 +984,8 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
             s["voltage_pp"] = [f"RY : {pp}", f"YB : {pp}", f"BR : {pp}"]
 
         elif ov_fault_v is not None and "ov faulty" in name_lower:
-            # Use precise Ph-N value without rounding to match reference (296.5)
             v = ov_fault_v
             pp = int(round(v * 1.73205))
-            # Format: show .5 if present, otherwise integer
             if v == int(v):
                 vs = str(int(v))
             else:
@@ -1055,12 +1005,10 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
             s["voltages_pn"] = [f"RN : {v}", f"YN : {v}", f"BN : {v}"]
             s["voltage_pp"] = [f"RY : {pp}", f"YB : {pp}", f"BR : {pp}"]
 
-        # ── Phase step name matching: use `in` not `==` (trailing space safe)
         elif "phase fail" in name_lower and "recovery" not in name_lower:
-            pass  # Let Gemini's values stand; these are correct in most runs
+            pass
 
-        # ── Section B settings normalization ─────────────────────────────
-        # OV steps should use Section B pot settings from OCR
+        # Section B settings normalization (OCR override)
         if any(kw in name_lower for kw in ["ov healthy", "ov faulty", "ov hystersis"]):
             if sec_b_ov_pct or sec_b_delay:
                 new_settings = []
@@ -1073,56 +1021,55 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
                     new_settings.append(st)
                 s["settings"] = new_settings
 
-        # ── Settings format normalization ────────────────────────────────
-        # 1. Uppercase sec → SEC
-        # 2. DELAY spacing: Section A "DELAY = 3SEC", others "DELAY = X SEC" (with space)
-        #    Detect Section A by UV = 8% context; all others get space before SEC.
-        # 3. OV/UV % format: reference uses "OV = 22 %" (space before %)
-        #    for Section B/C/D settings
+        # Settings format normalization
         if s.get("settings"):
             settings_str = " ".join(str(st) for st in s["settings"])
-            # Section A has UV=8%; but OV-named steps are ALWAYS Section B regardless of UV setting
+            # Section A: UV=8%. OV steps are NEVER Section A.
             is_section_a = bool(re.search(r"UV\s*=\s*8\s*%", settings_str, re.IGNORECASE))
             if any(kw in name_lower for kw in ["ov healthy", "ov faulty", "ov hystersis"]):
-                is_section_a = False  # OV steps are Section B, never A
+                is_section_a = False  # OV steps are always Section B
+
             new_settings = []
             for st in s["settings"]:
                 if isinstance(st, str):
-                    # Uppercase sec → SEC
+                    # Uppercase sec -> SEC
                     st = re.sub(r'\bsec\b', 'SEC', st, flags=re.IGNORECASE)
-                    # DELAY spacing: Section A gets no space (3SEC), others get space (X SEC)
+
+                    # DELAY spacing
                     if "DELAY" in st.upper():
                         if is_section_a:
-                            # "DELAY = 3 SEC" → "DELAY = 3SEC" (remove space before SEC)
                             st = re.sub(r'(\d+)\s+SEC', r'\1SEC', st)
                         else:
-                            # "DELAY = 0SEC" → "DELAY = 0 SEC" (add space before SEC)
                             st = re.sub(r'(\d+)SEC', r'\1 SEC', st)
-                    # % spacing: OV uses "OV = 22 %" (space before %) in non-Section-A
-                    # UV always uses "UV = 22%" (no space before %)
+
+                    # OV % spacing rules:
+                    # - Section A (UV=8%): OV = 22% (no space)
+                    # - Symmetrical (UV=22%, before Supply OFF change): OV = 22% (no space)
+                    # - Section B (OV steps): OV = 6 % or OV = 8 % (space, non-22 value)
+                    # - Section C/D (after Supply OFF change): OV = 22 % (space)
                     if re.match(r'OV\s*=', st, re.IGNORECASE):
                         is_ov_22 = bool(re.search(r'=\s*22\s*%', st, re.IGNORECASE))
                         if is_ov_22 and saw_supply_off_change:
-                            # Section C/D: "OV = 22%" → "OV = 22 %" (add space)
+                            # Section C/D: add space -> "OV = 22 %"
                             st = re.sub(r'(22)\s*%', r'\1 %', st)
                         elif is_ov_22:
-                            # Section A/Symmetrical: "OV = 22 %" → "OV = 22%" (no space)
+                            # Section A or Symmetrical: remove space -> "OV = 22%"
                             st = re.sub(r'(22)\s+%', r'\1%', st)
                         elif not is_section_a:
-                            # Non-22% OV in non-Section-A: "OV = 8%" → "OV = 8 %"
+                            # Non-22% OV in non-Section-A (Section B): add space -> "OV = 6 %"
                             st = re.sub(r'(\d+)\s*%', r'\1 %', st)
+
                     elif re.match(r'UV\s*=', st, re.IGNORECASE):
-                        # UV never has space before %: "UV = 22 %" → "UV = 22%"
+                        # UV never has space before %
                         st = re.sub(r'(\d+)\s+%', r'\1%', st)
+
                 new_settings.append(st)
             s["settings"] = new_settings
 
-        # ── Derive voltage_pp from voltages_pn if missing ─────────────────
-        # Section C/D steps have Ph-N voltages but Gemini often doesn't return
-        # the corresponding Ph-Ph values. Derive by multiplying by √3.
+        # Derive voltage_pp from voltages_pn — ONLY for Section C/D (after Supply OFF change)
+        # Section A has no voltage_pp. Section B already has it from Gemini.
         vpn = s.get("voltages_pn") or []
         vpp = s.get("voltage_pp") or []
-        # Only derive voltage_pp for Section C/D (after "Supply OFF change") — Section A has no voltage_pp
         if saw_supply_off_change and vpn and not vpp and not any(kw in name_lower for kw in ["dip s/w", "supply", "run time"]):
             derived_pp = []
             pp_labels = ["RY", "YB", "BR"]
@@ -1130,37 +1077,98 @@ def _extract_procedure(genai, machine: str, variant: str, specs: Specs, pages: L
                 m_v = re.search(r':\s*([\d.]+)', str(v_str))
                 if m_v:
                     pn_val = float(m_v.group(1))
-                    pp_val = round(pn_val * 1.73205)
+                    pp_val = int(pn_val * 1.73205)  # truncate, not round — matches reference
                     if idx < len(pp_labels):
                         derived_pp.append(f"{pp_labels[idx]} : {pp_val}")
             if derived_pp:
                 s["voltage_pp"] = derived_pp
 
-        # ── Relay / delay normalization for known step patterns ──────────
-        # UV symmetrical healthy should have "Relay countinuous ON" (reference typo)
+        # Section C/D voltage correction
+        # Gemini sometimes uses wrong reference voltage for Section C/D steps:
+        #   - Section A nominal (120V) or Section B nominal (277V) instead of Section C (240V)
+        # We detect this generically: if all 3 phases are equal but NOT at expected C/D nominal,
+        # or 2-of-3 are at a consistent wrong base, correct using OCR-derived nominal.
+        if saw_supply_off_change and sec_cd_nominal_pn:
+            vpn_fix = s.get("voltages_pn") or []
+            if len(vpn_fix) >= 3 and not any(kw in name_lower for kw in ["dip s/w", "supply", "run time"]):
+                pn_labels = ["RN", "YN", "BN"]
+                pn_vals = []
+                for vf in vpn_fix[:3]:
+                    m_vf = re.search(r':\s*([\d.]+)', str(vf))
+                    if m_vf:
+                        pn_vals.append(float(m_vf.group(1)))
+                    else:
+                        pn_vals.append(None)
+                valid_vals = [v for v in pn_vals if v is not None]
+                nom = int(sec_cd_nominal_pn) if sec_cd_nominal_pn == int(sec_cd_nominal_pn) else sec_cd_nominal_pn
+
+                if len(valid_vals) == 3:
+                    # Check if all 3 are equal (symmetric step with wrong base)
+                    all_equal = all(abs(v - pn_vals[0]) < 2.0 for v in pn_vals)
+                    at_correct_nom = abs(pn_vals[0] - sec_cd_nominal_pn) < 5.0
+                    
+                    if all_equal and not at_correct_nom and pn_vals[0] > 0:
+                        # All symmetric but wrong voltage — replace with correct C/D nominal
+                        wrong_base = pn_vals[0]
+                        s["voltages_pn"] = [f"{pn_labels[j]} : {nom}" for j in range(3)]
+                        pp_nom = int(nom * 1.73205)
+                        s["voltage_pp"] = [f"RY : {pp_nom}", f"YB : {pp_nom}", f"BR : {pp_nom}"]
+                        logger.info(f"  Section C/D voltage fix: {name} -> {nom}V Ph-N (was {wrong_base}V)")
+                    elif not all_equal:
+                        # Asymmetry: find the most common value (base voltage)
+                        from collections import Counter
+                        rounded = [round(v) for v in pn_vals]
+                        counts = Counter(rounded)
+                        most_common_val, most_common_count = counts.most_common(1)[0]
+                        
+                        if most_common_count >= 2 and abs(most_common_val - sec_cd_nominal_pn) > 5.0:
+                            # 2+ phases at wrong base — scale by ratio
+                            ratio = sec_cd_nominal_pn / most_common_val if most_common_val else 1.0
+                            if ratio > 1.2:  # Only fix if significant ratio difference
+                                new_vpn = []
+                                new_vpp = []
+                                pp_labels_inner = ["RY", "YB", "BR"]
+                                for j, v in enumerate(pn_vals):
+                                    scaled = round(v * ratio, 1)
+                                    if scaled == int(scaled):
+                                        vs = str(int(scaled))
+                                    else:
+                                        vs = f"{scaled:.2f}".rstrip("0").rstrip(".")
+                                    new_vpn.append(f"{pn_labels[j]} : {vs}")
+                                    new_vpp.append(f"{pp_labels_inner[j]} : {int(scaled * 1.73205)}")
+                                s["voltages_pn"] = new_vpn
+                                s["voltage_pp"] = new_vpp
+                                logger.info(f"  Section C/D asymmetry fix: {name} scaled by {ratio:.2f} (base was {most_common_val}V)")
+
+        # Phase angle 4th voltage entry
+        # Reference has (change phase angle) / (recover phase angle) as 4th voltages_pn
+        vpn_now = s.get("voltages_pn") or []
+        if "phase reverse" in name_lower:
+            if "recovery" not in name_lower:
+                if len(vpn_now) == 3:
+                    s["voltages_pn"] = vpn_now + ["(change phase angle)"]
+            else:
+                if len(vpn_now) == 3:
+                    s["voltages_pn"] = vpn_now + ["(recover phase angle)"]
+
+        # Relay/delay normalization
         if "uv symmmetrical healthy" in name_lower or "symmmetrical healthy" in name_lower:
             s["on_delay"] = "Relay countinuous ON"
 
-        # UV hystersis not recovery with DELAY=15 should have relay="Continuous OFF"
         if "uv hystersis not recovery" in name_lower:
             if any("15" in str(st) for st in (s.get("settings") or [])):
                 s["relay_status"] = "Continuous OFF"
 
-        # UV hystersis recovery (symmetrical) should have on_delay="After 4-6 sec"
         if "uv hystersis recovery" in name_lower:
             if any("15" in str(st) for st in (s.get("settings") or [])):
                 s["on_delay"] = "After 4-6 sec"
 
-        # Section A healthy condition: on_delay should be "4-6 sec"
-        # Section C Healthy condition: on_delay should be "Instant ON"
         if name_lower == "healthy condition":
             settings_str = " ".join(str(st) for st in (s.get("settings") or []))
-            # Section A has UV=8% (or similar non-22%), Section C has UV=22%
             has_uv_8 = bool(re.search(r"UV\s*=\s*8\s*%", settings_str, re.IGNORECASE))
             if has_uv_8:
                 s["on_delay"] = "4-6 sec"
             else:
-                # Section C healthy condition
                 s["on_delay"] = "Instant ON"
 
         processed.append(s)
@@ -1201,9 +1209,6 @@ def _normalize_step(raw: Dict) -> Optional[TestStep]:
         return None
 
     settings = raw.get("settings") or []
-
-    # preserve all extracted settings
-    # DIP switches frequently exceed 3 entries
     settings = (
         [str(x).strip() for x in settings if x]
         if isinstance(settings, list)
@@ -1214,15 +1219,12 @@ def _normalize_step(raw: Dict) -> Optional[TestStep]:
     voltages_pn = [str(x) for x in voltages_pn][:4] if isinstance(voltages_pn, list) else []
 
     leds = raw.get("leds") or []
-
-    # preserve all extracted LEDs
     leds = (
         [str(x).strip() for x in leds if x]
         if isinstance(leds, list)
         else []
     )
 
-    # Handle voltage_pp as list (new format) or string (legacy)
     raw_pp = raw.get("voltage_pp") or []
     if isinstance(raw_pp, list):
         voltage_pp = [str(x).strip() for x in raw_pp if x][:4]
@@ -1242,6 +1244,7 @@ def _normalize_step(raw: Dict) -> Optional[TestStep]:
         off_delay=raw.get("off_delay") or None,
         section_break=bool(raw.get("section_break")),
     )
+
 
 def _norm(s: str):
     return re.sub(r"\s+", "", s).upper()
@@ -1268,18 +1271,10 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
         )
         variants = [block.machine.upper()]
 
-    # When the block is the entire scope-fanned doc (62 pages), narrow to
-    # variant-relevant procedure pages. Otherwise standard classify.
-    # 🔴 Phase 5 Part 2: always variant-aware procedure mapping
-
-    # 🔴 Phase 5 FIX: robust spec page selection
     spec_pages = extract_table_pages(block.pages)
-
-    # keep only highest-confidence subset
     spec_pages = spec_pages[:8]
 
     if not spec_pages:
-        # fallback using classifier (any variant)
         cls = _classify_pages_for_variant(block, variants[0])
         spec_pages = cls["spec_pages"]
 
@@ -1287,24 +1282,18 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
 
     for v in variants:
         cls = _classify_pages_for_variant(block, v)
-
         proc_pages_per_variant[v] = cls["proc_pages"]
 
     logger.info(f"{block.machine}: spec_pages={len(spec_pages)} variants={len(variants)}")
 
-    # 🔴 Phase 3: extract raw table grids (for future use)
     table_grids = extract_table_grids(spec_pages)
     variant_maps = extract_variant_mappings(table_grids, known_variants=variants)
 
-    # ✅ DO NOT FILTER — keep full table context
-    logger.info(f"{block.machine}: full table variants → {list(variant_maps.keys())}")
-
-    logger.info(f"{block.machine}: mapped variants from tables → {list(variant_maps.keys())}")
+    logger.info(f"{block.machine}: full table variants -> {list(variant_maps.keys())}")
+    logger.info(f"{block.machine}: mapped variants from tables -> {list(variant_maps.keys())}")
     logger.info(f"{block.machine}: extracted {len(table_grids)} table grids")
 
     raw_specs = _extract_specs(genai, block.machine, variants, spec_pages)
-
-    # 🔴 Phase 3: merge table data
     raw_specs = merge_table_into_specs(variant_maps, raw_specs)
 
     out: Dict[str, VariantData] = {}
@@ -1327,16 +1316,15 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
 
         if not valid_voltage_specs:
             logger.warning(f"{v}: specs incomplete — continuing procedure extraction")
-        
-        # 🔴 Phase 4: store raw vision specs for validation
+
         variant_raw = raw_specs.get(v_key, {}) if isinstance(raw_specs, dict) else {}
         proc_pages = proc_pages_per_variant.get(v, [])
+
         steps_raw = _extract_procedure(genai, block.machine, v, specs, proc_pages, spec_pages=spec_pages)
         real_count = _count_test_steps(steps_raw)
         logger.info(f"{v}: step count = {real_count} (raw={len(steps_raw)})")
 
-        # ── Step count retry (Layout A only) ─────────────────────────────
-        # Detect layout for retry gating — Layout B has fewer steps, skip retry
+        # Step count retry — Layout A only
         has_cutoffs = bool(specs.lv_cutoff or specs.hv_cutoff)
         has_thresholds = bool(specs.uv_threshold_pct or specs.ov_threshold_pct)
         has_uv_ov = bool(specs.uv_range or specs.ov_range)
@@ -1347,7 +1335,7 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
             best_raw = steps_raw
             best_count = real_count
             for attempt in range(MAX_STEP_RETRIES):
-                time.sleep(10)  # quota protection
+                time.sleep(10)
                 retry_raw = _extract_procedure(genai, block.machine, v, specs, proc_pages, spec_pages=spec_pages)
                 retry_count = _count_test_steps(retry_raw)
                 logger.info(f"{v}: retry {attempt+1} step count = {retry_count}")
@@ -1374,9 +1362,7 @@ def extract_machine_data(block: Block, sub_machines: Optional[List[str]] = None)
             },
         )
 
-        # 🔴 attach raw specs
         vd.raw_specs = variant_raw
-
         out[v] = vd
 
         logger.info(

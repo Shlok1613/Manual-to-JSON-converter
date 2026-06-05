@@ -1,0 +1,16 @@
+2026-06-05 15:08:28,595 - INFO - ============================================================
+2026-06-05 15:08:28,595 - INFO - SESSION 9 BASELINE RUN — MAG03D0424
+2026-06-05 15:08:28,595 - INFO - Started: 2026-06-05T15:08:28.595238
+2026-06-05 15:08:28,595 - INFO - ============================================================
+2026-06-05 15:08:28,595 - INFO - Loading PDF...
+2026-06-05 15:08:28,595 - INFO - Extracting: WI.pdf
+2026-06-05 15:08:28,595 - INFO -   format: real PDF
+2026-06-05 15:08:39,051 - INFO - Loaded 62 pages
+2026-06-05 15:08:39,052 - INFO - Segmenting blocks...
+2026-06-05 15:08:39,052 - INFO - SCOPE detected (early): ['MAG03D0424', 'MAG03D0425', 'MAG03D0426', 'MAG03D0427', 'MAG03D0428']
+2026-06-05 15:08:39,052 - INFO - Segmented into 5 blocks:
+Traceback (most recent call last):
+  File "C:\Users\SHLOK\Desktop\Project\Manual-to-JSON-converter\run_s9_baseline.py", line 51, in <module>
+    logger.info(f"  {b.machine}: pages {b.page_start}-{b.page_end}")
+                                        ^^^^^^^^^^^^
+AttributeError: 'Block' object has no attribute 'page_start'

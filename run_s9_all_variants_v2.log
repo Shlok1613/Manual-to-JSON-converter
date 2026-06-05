@@ -1,0 +1,8 @@
+  [MAG03D0424 specs] 429 — retry 1/3 in 15s
+  [MAG03D0424 specs] 429 — retry 2/3 in 30s
+  [MAG03D0424 specs] 429 — retry 3/3 in 60s
+MAG03D0424: Gemini failed — aborting extraction
+MAG03D0424EG: specs incomplete — continuing procedure extraction
+  [MAG03D0424EG proc] 429 — retry 1/3 in 15s
+  [MAG03D0424EG proc] 429 — retry 2/3 in 30s
+  [MAG03D0424EG proc] 429 — retry 3/3 in 60s
