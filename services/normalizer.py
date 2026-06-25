@@ -55,7 +55,9 @@ def normalize_variant(vd: VariantData) -> VariantData:
 
         cleaned = []
         for v in step.voltages_pn:
-            if any(c.isdigit() for c in v):
+            if any(c.isdigit() for c in v) or re.search(
+                r"phase\s+angle", v, re.IGNORECASE
+            ):
                 cleaned.append(v)
             else:
                 step.flags.append(f"invalid voltage entry: {v}")

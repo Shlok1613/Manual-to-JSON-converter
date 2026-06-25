@@ -1,5 +1,6 @@
 import re
 from .types import VariantData
+from services.delay_utils import is_spurious_delay_hallucination
 
 def _find_voltage_ranges(text: str):
     matches = re.findall(
@@ -50,6 +51,15 @@ def _find_delay(text: str):
     elif "sec" not in val and val not in ["instant", "continuous"]:
         val = val + " sec"
 
+    if is_spurious_delay_hallucination(val):
+        return None
+
+    return val
+
+
+def _safe_delay(val):
+    if not val or is_spurious_delay_hallucination(val):
+        return None
     return val
 
 
@@ -62,7 +72,7 @@ def enrich_variant(vd: VariantData, block_text: str) -> VariantData:
             vd.specs.ref_voltage = rv
 
     if not vd.specs.on_delay and vd.raw_specs:
-        d = _find_delay(block_text)
+        d = _safe_delay(_find_delay(block_text))
         if d:
             vd.specs.on_delay = d
 
@@ -84,11 +94,11 @@ def enrich_variant(vd: VariantData, block_text: str) -> VariantData:
     # _find_delay() would grab a random delay from an unrelated section.
     for step in vd.test_steps:
         if not step.on_delay and len(block_text) < 8000:
-            d = _find_delay(block_text)
+            d = _safe_delay(_find_delay(block_text))
             if d:
                 step.on_delay = d
 
     # DO NOT fabricate DIP switches
     pass
 
-    return vd
+    return vd

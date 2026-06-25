@@ -19,6 +19,7 @@ Layout B  (simpler cut-off machines: MAG03D0427/0428)
 from pathlib import Path
 from typing import Dict, Any
 import logging
+import re
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -141,6 +142,21 @@ def detect_layout(specs: Specs, test_steps=None) -> Dict:
     has_cutoffs = bool(specs.lv_cutoff or specs.hv_cutoff)
     has_dips = bool(specs.dip_switches)
 
+    # Infer layout from test_steps LED count — reliable when spec extraction is partial
+    if test_steps:
+        led_steps = [s for s in test_steps if s.leds and len(s.leds) > 0]
+        if led_steps:
+            all_single_r_led = all(
+                len(s.leds) == 1
+                and re.search(r"R\s*\(.*RED", s.leds[0] or "", re.IGNORECASE)
+                for s in led_steps
+            )
+            if all_single_r_led:
+                return LAYOUT_B
+            has_multi_leds = any(len(s.leds) >= 3 for s in led_steps)
+            if has_multi_leds:
+                return LAYOUT_A
+
     # Explicit cutoff machines → Layout B
     if (not has_thresholds and not has_uv_ov) and has_cutoffs:
         return LAYOUT_B
@@ -154,16 +170,18 @@ def detect_layout(specs: Specs, test_steps=None) -> Dict:
     # If specs are all empty, try to infer from test_steps
     specs_empty = not (has_thresholds or has_uv_ov or has_cutoffs or has_dips or specs.ref_voltage)
     if specs_empty and test_steps:
-        # Layout A machines have voltage_pp data in steps
-        has_pp_voltages = any(s.voltage_pp and len(s.voltage_pp) > 0 for s in test_steps)
-        if has_pp_voltages:
-            return LAYOUT_A
-        # Layout A machines also have multiple voltage entries
-        has_multi_voltage = any(
-            s.voltages_pn and len(s.voltages_pn) >= 3
-            for s in test_steps
-        )
-        if has_multi_voltage:
+        # Layout B machines have single LED "R (RED LED)" — check for this pattern
+        led_steps = [s for s in test_steps if s.leds and len(s.leds) > 0]
+        if led_steps:
+            all_single_r_led = all(
+                len(s.leds) == 1 and "R (" in (s.leds[0] if s.leds else "")
+                for s in led_steps
+            )
+            if all_single_r_led:
+                return LAYOUT_B
+        # Layout A machines have 4 LEDs (PWR, UV, OV, ASY) — check for multiple LEDs
+        has_multi_leds = any(s.leds and len(s.leds) >= 3 for s in test_steps)
+        if has_multi_leds:
             return LAYOUT_A
     
     if ref_v >= 230 and not has_dips and not has_thresholds and not has_uv_ov:
@@ -180,6 +198,9 @@ def _write_header_a(ws, specs: Specs, layout: Dict) -> None:
     on_col = layout["on_col"]
     off_col = layout["off_col"]
 
+    ws.cell(row=2, column=layout["step_col"], value="Test cases/ parameters").font = HEADER_FONT
+    ws.cell(row=2, column=layout["settings_col"], value="POT Setting").font = HEADER_FONT
+    ws.cell(row=2, column=layout["voltage_pn_col"], value="Voltage Setting").font = HEADER_FONT
     ws.cell(row=2, column=led_col, value="LED STATUS").font = HEADER_FONT
     ws.cell(row=2, column=relay_col, value="relay status").font = HEADER_FONT
     ws.cell(row=2, column=on_col, value="On delay").font = HEADER_FONT
@@ -216,7 +237,8 @@ def _write_header_b(ws, specs: Specs, layout: Dict) -> None:
 
 # ---------- step writer --------------------------------------------------
 
-def _write_step(ws, row: int, step: TestStep, layout: Dict) -> int:
+def _write_step(ws, row: int, step: TestStep, layout: Dict, is_first_step: bool = False,
+                next_step_lower: str = "") -> int:
     """Write one test step group. Returns the next free row (incl. blank)."""
     name_cell = ws.cell(row=row, column=layout["step_col"], value=step.step_name or "")
     name_cell.alignment = WRAP_TOP
@@ -275,7 +297,23 @@ def _write_step(ws, row: int, step: TestStep, layout: Dict) -> int:
         len(pp_list),
     )
     if layout["name"] == "B":
-        blank_rows = 3 if step.section_break else 2
+        # First functional step in Layout B gets 3 blank rows (gap=6),
+        # subsequent steps maintain a constant total gap of 5 (rows_used + blank = 5)
+        # per reference Excel. Section breaks and "not recovery" steps use gap=6.
+        step_lower = (step.step_name or "").lower()
+        if step.section_break:
+            blank_rows = 3
+        elif is_first_step:
+            blank_rows = 3
+        elif step_lower == "lower cut off":
+            blank_rows = max(6 - rows_used, 1)
+        elif "lower cut off recovery" in step_lower:
+            if next_step_lower.startswith("repeated tests"):
+                blank_rows = max(4 - rows_used, 1)
+            else:
+                blank_rows = max(5 - rows_used, 1)
+        else:
+            blank_rows = max(5 - rows_used, 1)
     else:
         blank_rows = 2 if step.section_break else 1
     if step.step_name == "Run time DIP switch change error":
@@ -309,9 +347,11 @@ def _write_variant_sheet(ws, variant: VariantData) -> Dict:
         return layout
 
     first_dip_written = False
+    first_step_written = False  # Track first functional step for Layout B spacing
+    steps_list = variant.test_steps
 
     # normal flow
-    for step in variant.test_steps:
+    for idx, step in enumerate(steps_list):
         # Handle DIP S/W Change steps
         if step.step_name and "DIP S/W" in step.step_name:
             if not first_dip_written and layout["has_dip_block"]:
@@ -370,7 +410,8 @@ def _write_variant_sheet(ws, variant: VariantData) -> Dict:
                         c.alignment = WRAP_TOP; c.border = BORDER
                     row += max(len(dip_settings), len(step.voltages_pn), len(step.leds or []), 3) + 1
                 else:
-                    row += max(len(dip_settings), 1) + 1  # DIP block + 1 blank row
+                    blank = 2 if step.section_break else 1
+                    row += max(len(dip_settings), 1) + blank  # DIP block + 1 or 2 blank rows
                 first_dip_written = True
                 continue
 
@@ -388,22 +429,44 @@ def _write_variant_sheet(ws, variant: VariantData) -> Dict:
             # But keep longer labels like "Supply OFF change voltages as follows..."
             if name_lower == "supply off":
                 continue
-            # "Supply couple at X VAC" goes in voltage_pn_col (col H) per reference
+            # "Couple all voltage" / "Couple all Voltages" — write label in the PREVIOUS blank row
+            # (row-1, in settings_col G), no row advance. Reference places it in the blank row of
+            # the preceding Phase Asymmetry recovery step.
+            if "couple" in name_lower and "supply couple" not in name_lower and "decouple" not in name_lower:
+                c = ws.cell(row=row - 1, column=layout["settings_col"], value=step.step_name)
+                c.alignment = WRAP_TOP
+                c.font = LABEL_FONT
+                continue  # no row advance — UV tests start at current row
+            # "Decouple all voltages" — write label in blank row of preceding Healthy condition (row-1)
+            if "decouple" in name_lower:
+                c = ws.cell(row=row - 1, column=layout["settings_col"], value=step.step_name)
+                c.alignment = WRAP_TOP
+                c.font = LABEL_FONT
+                continue  # no row advance — OV tests start at current row
+            # "Supply couple at X VAC" goes in voltage_pn_col per reference
             if "supply couple" in name_lower:
                 c = ws.cell(row=row, column=layout["voltage_pn_col"], value=step.step_name)
             else:
-                # Other section labels (e.g. "Supply OFF change voltages...")
-                # go in step_col (col F) per reference
+                # Other section labels (e.g. "Supply OFF change voltages...", "Repeated Tests -")
+                # go in step_col per reference
                 c = ws.cell(row=row, column=layout["step_col"], value=step.step_name)
             c.alignment = WRAP_TOP
             c.font = LABEL_FONT
-            row += 1
-            # Non-couple section labels get an extra blank row per reference
-            if "supply couple" not in name_lower:
-                row += 1
+            # Advance rows: section_break=True in Layout A = 1 label + 3 blank (4 total)
+            # section_break=False or Layout B = 1 label + 1 blank (2 total)
+            if step.section_break and layout["name"] != "B":
+                row += 4
+            else:
+                row += 2
             continue
 
-        row = _write_step(ws, row, step, layout)
+        is_first = (layout["name"] == "B" and not first_step_written)
+        next_lower = ""
+        if idx + 1 < len(steps_list) and steps_list[idx + 1].step_name:
+            next_lower = steps_list[idx + 1].step_name.lower().strip()
+        row = _write_step(ws, row, step, layout, is_first_step=is_first,
+                          next_step_lower=next_lower)
+        first_step_written = True
 
     _apply_widths(ws, layout)
     return layout
