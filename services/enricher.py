@@ -88,17 +88,6 @@ def enrich_variant(vd: VariantData, block_text: str) -> VariantData:
             vd.specs.uv_range = f"{ranges[0][0]}-{ranges[0][1]} VAC"
             vd.specs.ov_range = f"{ranges[1][0]}-{ranges[1][1]} VAC"
 
-    # -------- STEPS NORMALIZATION --------
-    # Only apply delay enrichment from block text if the block is small/targeted.
-    # For SCOPE documents, block_text is the entire 62-page combined text —
-    # _find_delay() would grab a random delay from an unrelated section.
-    for step in vd.test_steps:
-        if not step.on_delay and len(block_text) < 8000:
-            d = _safe_delay(_find_delay(block_text))
-            if d:
-                step.on_delay = d
-
-    # DO NOT fabricate DIP switches
-    pass
+    # DO NOT fabricate DIP switches or delays from block text.
 
     return vd

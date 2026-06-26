@@ -37,8 +37,8 @@ from services.validator import validate_variants
 from services.template_writer import write_variant_workbook, write_consolidated_workbook
 from services.enricher import enrich_variant
 from services.normalizer import normalize_variant
-from services.table_extractor import detect_variants_from_text
 from services.spec_linker import link_specs_to_steps
+from services.table_extractor import detect_variants_from_text
 
 Base.metadata.create_all(bind=engine)
 
@@ -86,6 +86,22 @@ def _persist_extraction(extraction_id: str, payload: dict) -> None:
     except Exception as e:
         logger.warning(f"DB persist failed (non-fatal): {e}")
 
+def _sanitize_bad_specs(vd):
+            """
+            Clear spec fields that triggered physically-invalid flags.
+            Keeps procedure steps intact. Better partial output than zero output.
+            """
+            flags = vd.specs.flags
+            if any("UV max" in f or "physically invalid" in f for f in flags):
+                logger.warning(f"[SANITIZE] {vd.name}: UV/OV overlap — clearing uv_range and ov_range")
+                vd.specs.uv_range = None
+                vd.specs.ov_range = None
+                vd.specs.flags = [f for f in flags if "UV max" not in f and "physically invalid" not in f]
+            if any("LV cutoff >= HV cutoff" in f for f in vd.specs.flags):
+                logger.warning(f"[SANITIZE] {vd.name}: LV/HV overlap — clearing hv_cutoff")
+                vd.specs.hv_cutoff = None
+                vd.specs.flags = [f for f in vd.specs.flags if "LV cutoff" not in f]
+            return vd
 
 @app.post("/api/extract", response_model=ExtractionResult)
 async def extract_pdf(
@@ -136,7 +152,6 @@ async def extract_pdf(
 
     # 2. segment blocks
     try:
-        # 🔴 Phase 4: always segment FULL document
         blocks = segment_blocks(
             pages,
             user_names=user_names if user_names else None
@@ -175,14 +190,11 @@ async def extract_pdf(
 
         seen_machines.add(machine_name)
 
-        # 🔴 Phase 4: skip blocks not requested (ONLY if user specified machines)
         if machine_dict and machine_name not in machine_dict:
             logger.info(f"{machine_name}: skipped (not in user input)")
             continue
 
         user_variants = machine_dict.get(machine_name, [])
-
-        # 🔴 Auto-detect from text
         detected_variants = detect_variants_from_text(block.text)
         logger.info(
             f"[VARIANTS] machine={block.machine} "
@@ -194,8 +206,6 @@ async def extract_pdf(
         # a single machine. Do not auto-detect sibling IDs as variants.
         if block.is_scope_block:
             sub_machines = [machine_name]
-        # 🔴 Hybrid logic
-        # 🔴 STRICT FILTER: only process requested machine if given
         elif user_variants:
             # Use user input, but keep only valid ones
             sub_machines = [
@@ -222,7 +232,6 @@ async def extract_pdf(
                 
         try:
             if sub_machines:
-                # 🔴 Phase 5 FIX: single extraction for all variants
                 try:
                     variants = extract_machine_data(
                         block=block,
@@ -251,28 +260,10 @@ async def extract_pdf(
             vdata = normalize_variant(vdata)
             variants[vname] = vdata
 
-        # 🔴 Phase 4: spec-procedure linking
         variants = link_specs_to_steps(variants)
 
         # Then validate
         variants = validate_variants(variants)
-
-        def _sanitize_bad_specs(vd):
-            """
-            Clear spec fields that triggered physically-invalid flags.
-            Keeps procedure steps intact. Better partial output than zero output.
-            """
-            flags = vd.specs.flags
-            if any("UV max" in f or "physically invalid" in f for f in flags):
-                logger.warning(f"[SANITIZE] {vd.name}: UV/OV overlap — clearing uv_range and ov_range")
-                vd.specs.uv_range = None
-                vd.specs.ov_range = None
-                vd.specs.flags = [f for f in flags if "UV max" not in f and "physically invalid" not in f]
-            if any("LV cutoff >= HV cutoff" in f for f in vd.specs.flags):
-                logger.warning(f"[SANITIZE] {vd.name}: LV/HV overlap — clearing hv_cutoff")
-                vd.specs.hv_cutoff = None
-                vd.specs.flags = [f for f in vd.specs.flags if "LV cutoff" not in f]
-            return vd
 
         usable = {}
         rejected = {}

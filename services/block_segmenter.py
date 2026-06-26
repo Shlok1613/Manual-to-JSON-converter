@@ -128,7 +128,7 @@ def segment_blocks(pages: List[Page], user_names: Optional[List[str]] = None) ->
 
     full_text = "\n\n".join(p.ocr_text for p in pages)
 
-        # 🔴 FIX: Early SCOPE-based detection (for WI PDFs)
+    # Early SCOPE-based detection (for WI PDFs)
     scope_match = SCOPE_PATTERN.search(full_text)
 
     if scope_match:
@@ -236,10 +236,10 @@ def segment_blocks(pages: List[Page], user_names: Optional[List[str]] = None) ->
     while i < len(blocks):
         b = blocks[i]
         if (
-    len(b.text) < MIN_MERGE
-    and not _has_table_spec(b.text)
-    and i + 1 < len(blocks)
-):
+            len(b.text) < MIN_MERGE
+            and not _has_table_spec(b.text)
+            and i + 1 < len(blocks)
+        ):
             nxt = blocks[i + 1]
             new_pages = list(b.pages)
             new_range = list(b.page_range)
@@ -264,39 +264,6 @@ def segment_blocks(pages: List[Page], user_names: Optional[List[str]] = None) ->
             if real != b.machine:
                 b.machine = real
 
-    # SCOPE-based fan-out: consolidated WI documents (SCOPE: A / B / C / ...)
-    scope_fanned = False
-    if blocks:
-        combined_text = "\n".join(b.text for b in blocks)
-        sm = SCOPE_PATTERN.search(combined_text)
-        if sm:
-            counts = Counter(b.machine for b in blocks)
-            most_count = counts.most_common(1)[0][1]
-            dominance = most_count / max(len(blocks), 1)
-            scope_products = re.findall(
-                r"(MAG\d+[A-Z0-9]+|MAC\d+[A-Z0-9]+|SM\d+_[A-Z]|SM\d+|MG\d+[A-Z]+)",
-                sm.group(1), re.IGNORECASE,
-            )
-            scope_products = list(dict.fromkeys(p.upper() for p in scope_products))
-            if len(scope_products) > 1 and (dominance >= 0.5 or len(blocks) <= 2):
-                all_pages: List[Page] = []
-                seen = set()
-                all_range: List[int] = []
-                for b in blocks:
-                    for p in b.pages:
-                        if p.num not in seen:
-                            seen.add(p.num)
-                            all_pages.append(p)
-                            all_range.append(p.num)
-                blocks = [
-                    Block(machine=p, text=combined_text,
-                          page_range=list(all_range), pages=list(all_pages),
-                          header=f"SCOPE: {p}")
-                    for p in scope_products
-                ]
-                scope_fanned = True
-                logger.info(f"SCOPE fan-out: {scope_products}")
-
     if user_names:
         wanted = [n.upper() for n in user_names]
         kept = [b for b in blocks if b.machine.upper() in wanted]
@@ -318,7 +285,7 @@ def segment_blocks(pages: List[Page], user_names: Optional[List[str]] = None) ->
                         m.pages.append(p)
         blocks = [merged_by_name[n] for n in wanted if n in merged_by_name]
         logger.info(f"After user filter: {[b.machine for b in blocks]}")
-    elif not scope_fanned:
+    else:
         seen_count: dict = {}
         for b in blocks:
             seen_count[b.machine] = seen_count.get(b.machine, 0) + 1

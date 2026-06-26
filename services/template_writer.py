@@ -279,8 +279,6 @@ def _write_step(ws, row: int, step: TestStep, layout: Dict, is_first_step: bool 
         c = ws.cell(row=row, column=layout["on_col"], value=step.on_delay)
         c.alignment = WRAP_TOP
         c.border = BORDER
-        if step.step_name == "UV hystersis recovery" and step.on_delay == "After 4-6 sec":
-            ws.cell(row=row + 1, column=layout["relay_col"], value=step.on_delay).alignment = WRAP_TOP
     if step.off_delay:
         c = ws.cell(row=row, column=layout["off_col"], value=step.off_delay)
         c.alignment = WRAP_TOP

@@ -172,7 +172,7 @@ def validate_variants(variants: Dict[str, VariantData]) -> Dict[str, VariantData
                 logger.warning(f"  {name} step {i+1}: {sf}")
     _cross_check_variants(variants)
     for vname, vdata in variants.items():
-        # 🔴 Phase 4: table vs vision consistency check
+        # table vs vision consistency check
         mismatch_flags = compare_table_vs_vision(vdata)
 
         if mismatch_flags:
