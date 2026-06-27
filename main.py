@@ -309,7 +309,9 @@ async def extract_pdf(
                 )
                 excel_files.append(fname)
             except Exception as e:
+                import traceback
                 logger.info(f"{machine_name}/{vname}: Excel write failed: {e}")
+                logger.info(f"TRACEBACK:\n{traceback.format_exc()}")
 
         # 2. ALWAYS write consolidated machine file (even if single variant)
         try:
@@ -321,7 +323,9 @@ async def extract_pdf(
             )
             excel_files.append(fname)
         except Exception as e:
+            import traceback
             logger.info(f"{machine_name}: consolidated Excel failed: {e}")
+            logger.info(f"TRACEBACK:\n{traceback.format_exc()}")
 
         machine_summary.append({
             "machine": machine_name,

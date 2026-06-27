@@ -328,6 +328,18 @@ def _apply_widths(ws, layout: Dict) -> None:
 # ---------- public API ---------------------------------------------------
 
 def _write_variant_sheet(ws, variant: VariantData) -> Dict:
+    # Guard against None fields from Gemini null responses
+    specs = variant.specs
+    specs.dip_switches = specs.dip_switches or []
+    specs.led_indications = specs.led_indications or {}
+    specs.flags = specs.flags or []
+    for step in (variant.test_steps or []):
+        step.settings = step.settings or []
+        step.voltages_pn = step.voltages_pn or []
+        step.voltage_pp = step.voltage_pp or []
+        step.leds = step.leds or []
+        step.flags = step.flags or []
+
     layout = detect_layout(variant.specs, test_steps=variant.test_steps)
 
     if layout["has_dip_block"]:
@@ -431,15 +443,17 @@ def _write_variant_sheet(ws, variant: VariantData) -> Dict:
             # (row-1, in settings_col G), no row advance. Reference places it in the blank row of
             # the preceding Phase Asymmetry recovery step.
             if "couple" in name_lower and "supply couple" not in name_lower and "decouple" not in name_lower:
-                c = ws.cell(row=row - 1, column=layout["settings_col"], value=step.step_name)
-                c.alignment = WRAP_TOP
-                c.font = LABEL_FONT
+                if layout["settings_col"] is not None:
+                    c = ws.cell(row=row - 1, column=layout["settings_col"], value=step.step_name)
+                    c.alignment = WRAP_TOP
+                    c.font = LABEL_FONT
                 continue  # no row advance — UV tests start at current row
             # "Decouple all voltages" — write label in blank row of preceding Healthy condition (row-1)
             if "decouple" in name_lower:
-                c = ws.cell(row=row - 1, column=layout["settings_col"], value=step.step_name)
-                c.alignment = WRAP_TOP
-                c.font = LABEL_FONT
+                if layout["settings_col"] is not None:
+                    c = ws.cell(row=row - 1, column=layout["settings_col"], value=step.step_name)
+                    c.alignment = WRAP_TOP
+                    c.font = LABEL_FONT
                 continue  # no row advance — OV tests start at current row
             # "Supply couple at X VAC" goes in voltage_pn_col per reference
             if "supply couple" in name_lower:

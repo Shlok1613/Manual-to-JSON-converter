@@ -1,0 +1,37 @@
+{
+  "extraction_id": "ext_ea134958",
+  "original_filename": "WI.pdf",
+  "saved_as": "ext_ea134958_WI.pdf",
+  "num_pages": 62,
+  "num_machines": 1,
+  "machines": [
+    "MAG03D0427"
+  ],
+  "machine_summary": [
+    {
+      "machine": "MAG03D0427",
+      "status": "ok",
+      "variants": [
+        "MAG03D0427"
+      ],
+      "flags": {
+        "MAG03D0427": {
+          "spec_flags": [
+            "missing voltage_unit",
+            "no voltage ranges extracted"
+          ],
+          "step_flag_count": 21
+        }
+      }
+    }
+  ],
+  "excel_files": [
+    "ext_ea134958_MAG03D0427.xlsx",
+    "ext_ea134958_MAG03D0427_All_CatID.xlsx"
+  ],
+  "user_input": {
+    "MAG03D0427": []
+  },
+  "status": "completed",
+  "timestamp": "2026-06-26T16:58:36.982697"
+}

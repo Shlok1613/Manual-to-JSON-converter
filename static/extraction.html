@@ -201,37 +201,31 @@ function downloadExcel(url, filename) {
 
 // --- MAIN LOAD LOGIC ---
 async function loadExtraction() {
-  if (!id){
+  if (!id) {
     document.getElementById("content").innerHTML = `<div class="text-red-400 p-6 glass rounded-2xl">Error: No Extraction ID provided in URL.</div>`;
-    document.getElementById("skeleton-loader").remove();
+    document.getElementById("skeleton-loader")?.remove();
     return;
   }
 
   try {
-    // Fetch detailed metadata/files info
-   const res = await fetch(`${API}/api/files/${id}`);
+    const res = await fetch(`${API}/api/extraction/${id}`);
 
     if (!res.ok) {
-      // 🔥 If extraction deleted → redirect to dashboard
       if (res.status === 404) {
         showToast("Extraction not found or deleted", "error");
-        setTimeout(() => {
-          window.location.href = "/";
-        }, 1200);
+        setTimeout(() => { window.location.href = "/"; }, 1200);
         return;
       }
-
       throw new Error('Failed to load extraction data');
     }
-    const responseData = await res.json();
-    const data = responseData.metadata; // the extraction specific JSON
-    const files = responseData.files || [];
 
-    // Header updates
-    document.getElementById("title").innerText = data.original_filename || id;
-    document.getElementById("title").title = data.original_filename || id;
+    const data = await res.json();
+    const excelFiles = data.excel_files || [];
+    const machineSummary = data.machine_summary || [];
+
+    document.getElementById("title").innerText = (data.machines && data.machines[0]) || id;
     document.getElementById("id-display").innerText = `ID: ${id}`;
-    
+
     const isFailed = data.status === 'failed';
     const statusEl = document.getElementById("header-status");
     if (isFailed) {
@@ -242,130 +236,67 @@ async function loadExtraction() {
       statusEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> Completed Successfully`;
     }
 
-    // Process Machines UI
     let machinesHTML = '';
-    if (data.machine_details && data.machine_details.length > 0) {
-      machinesHTML = data.machine_details.map(m => {
-        const hasSubMachines = m.has_sub_machines && m.sub_machines && m.sub_machines.length > 0;
-
-        const parentFile = files.find(f =>
-          f.filename.toLowerCase().includes(`_${m.machine.toLowerCase()}.xlsx`)
-        );
-
-        const downloadAllBtn = parentFile
-          ? `<button onclick="downloadExcel('${parentFile.download_url}', '${parentFile.filename}')"
-               class="p-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded-lg transition
-                      border border-blue-500/20 flex items-center gap-2 text-xs font-medium">
-               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-               </svg>
-               ${hasSubMachines ? 'Download All' : 'Excel'}
+    if (machineSummary.length > 0) {
+      machinesHTML = machineSummary.map(m => {
+        const consolidatedFile = excelFiles.find(f => f.includes(`_${m.machine}_All_CatID`));
+        const downloadAllBtn = consolidatedFile
+          ? `<button onclick="downloadExcel('/api/download/${id}/${consolidatedFile}', '${consolidatedFile}')"
+               class="px-3 py-1.5 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 rounded-lg transition border border-cyan-500/20 text-xs font-medium">
+               Download Full
              </button>`
-          : `<span class="text-xs text-amber-400 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20">Results Deleted</span>`;
+          : '';
 
-        let subMachineRows = '';
-        if (hasSubMachines) {
-          subMachineRows = m.sub_machines.map(sub => {
-            const subFile = files.find(f =>
-              f.filename.toLowerCase().includes(`_${m.machine.toLowerCase()}_${sub.toLowerCase()}.xlsx`)
-            );
-            const subDownloadBtn = subFile
-              ? `<button onclick="downloadExcel('${subFile.download_url}', '${subFile.filename}')"
-                   class="p-1.5 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg
-                          transition border border-purple-500/20 text-xs font-medium flex items-center gap-1">
-                   <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                   </svg>
-                   Download
-                 </button>`
-              : '';
-            return `
-              <div class="flex justify-between items-center px-4 py-2 bg-slate-800/20
-                          border-l-2 border-purple-500/30 ml-8 rounded-r-lg">
-                <span class="text-sm text-purple-300 font-medium">${sub}</span>
-                ${subDownloadBtn}
-              </div>`;
-          }).join('');
-        }
+        const variants = m.variants || [];
+        let variantRows = '';
+        variants.forEach(variant => {
+          const variantFile = excelFiles.find(f =>
+            f.includes(`_${m.machine}_${variant}.xlsx`) ||
+            f.endsWith(`_${variant}.xlsx`)
+          );
+          const dlBtn = variantFile
+            ? `<button onclick="downloadExcel('/api/download/${id}/${variantFile}', '${variantFile}')"
+                 class="px-2 py-1 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg transition border border-purple-500/20 text-xs font-medium">
+                 Download
+               </button>`
+            : '';
+          variantRows += `
+            <div class="flex justify-between items-center px-4 py-2 bg-slate-800/20 border-l-2 border-purple-500/30 ml-8 rounded-r-lg">
+              <span class="text-sm text-purple-300 font-medium">${variant}</span>
+              ${dlBtn}
+            </div>`;
+        });
 
         return `
-          <div class="group bg-slate-800/40 border border-slate-700/50 rounded-xl
-                      overflow-hidden hover:border-cyan-500/30 transition-all">
-            <div class="flex justify-between items-center p-4
-                        ${hasSubMachines ? 'cursor-pointer hover:bg-slate-700/40' : ''}"
-                 ${hasSubMachines ? `onclick="this.nextElementSibling.classList.toggle('hidden')"` : ''}>
+          <div class="bg-slate-800/40 border border-slate-700/50 rounded-xl overflow-hidden hover:border-cyan-500/30 transition-all">
+            <div class="flex justify-between items-center p-4 cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">
               <div class="flex items-center gap-3">
                 <div class="p-2 bg-slate-700 rounded-lg text-slate-300">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
                   </svg>
                 </div>
-                <div>
-                  <span class="font-medium text-slate-200 block">${m.machine}</span>
-                  <span class="text-xs text-slate-400">
-                    ${hasSubMachines
-                      ? `${m.sub_machines.length} variants · ${m.num_test_conditions} total conditions`
-                      : `${m.num_test_conditions} conditions`}
-                  </span>
-                </div>
+                <span class="font-medium text-slate-200">${m.machine}</span>
               </div>
               <div class="flex items-center gap-3">
-                ${hasSubMachines
-                  ? `<span class="text-xs text-purple-400 bg-purple-500/10 border border-purple-500/20
-                                px-2 py-1 rounded-full">${m.sub_machines.length} variants</span>`
-                  : `<span class="text-cyan-400 font-medium bg-cyan-900/20 px-3 py-1 rounded-full
-                                text-sm border border-cyan-500/20">${m.num_test_conditions} Conditions</span>`}
                 ${downloadAllBtn}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
               </div>
             </div>
-            ${hasSubMachines
-              ? `<div class="hidden border-t border-slate-700/50 py-2 space-y-1">
-                   ${subMachineRows}
-                 </div>`
-              : ''}
+            ${variantRows ? `<div class="border-t border-slate-700/50 py-2 space-y-1">${variantRows}</div>` : ''}
           </div>`;
-      }).join("");
+      }).join('');
     } else {
-      machinesHTML = `<div class="p-6 text-center text-slate-500 bg-slate-800/20 rounded-xl border border-dashed border-slate-700">No machine units detected.</div>`;
+      machinesHTML = `<div class="p-6 text-center text-slate-500 bg-slate-800/20 rounded-xl border border-dashed border-slate-700">No machine data available.</div>`;
     }
-
-    // Check if original PDF is available
-    let pdfAvailable = false;
-    try {
-      const pdfCheck = await fetch(`${API}/api/pdf/${id}`, { method: 'HEAD' });
-      pdfAvailable = pdfCheck.ok;
-    } catch (_) { pdfAvailable = false; }
-
-    const pdfBtnHtml = pdfAvailable
-      ? `<a href="${API}/api/pdf/${id}" download
-           class="w-full py-3 mb-3 bg-cyan-800/30 hover:bg-cyan-700/40 text-cyan-400 border border-cyan-500/30 rounded-xl transition-colors font-medium flex justify-center items-center gap-2 shadow-sm">
-           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-           </svg>
-           Download Original PDF
-         </a>`
-      : `<div class="w-full py-3 mb-3 bg-slate-800/30 text-slate-600 border border-dashed border-slate-700 rounded-xl font-medium flex justify-center items-center gap-2 text-sm cursor-not-allowed">
-           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-           </svg>
-           PDF Deleted
-         </div>`;
 
     document.getElementById("content").innerHTML = `
     <div class="grid lg:grid-cols-3 gap-8 items-start">
-
-      <!-- SUMMARY PANEL (1/3 width) -->
       <div class="glass p-8 rounded-3xl border border-slate-700/50 shadow-xl overflow-hidden relative">
         <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-cyan-500 to-blue-600 opacity-50"></div>
-        <h2 class="text-xl font-bold mb-6 text-white flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          Extraction Summary
-        </h2>
-
+        <h2 class="text-xl font-bold mb-6 text-white">Extraction Summary</h2>
         <div class="space-y-4 mb-8">
           <div class="flex justify-between items-center pb-3 border-b border-slate-700/50">
             <span class="text-slate-400">Pages Processed</span>
@@ -373,83 +304,35 @@ async function loadExtraction() {
           </div>
           <div class="flex justify-between items-center pb-3 border-b border-slate-700/50">
             <span class="text-slate-400">Machines Found</span>
-            <span class="font-semibold text-white bg-slate-800 px-3 py-1 rounded-full">${data.num_machines}</span>
+            <span class="font-semibold text-white bg-slate-800 px-3 py-1 rounded-full">${data.num_machines || "-"}</span>
           </div>
           <div class="flex justify-between items-center pb-3 border-b border-slate-700/50">
-            <span class="text-slate-400">Upload Date</span>
-            <span class="text-sm text-slate-300">${new Date(data.uploaded_at).toLocaleDateString()}</span>
+            <span class="text-slate-400">Date</span>
+            <span class="text-sm text-slate-300">${data.timestamp ? new Date(data.timestamp).toLocaleDateString() : "-"}</span>
           </div>
         </div>
-
-        ${pdfBtnHtml}
-
-        <button onclick="showJSON()" class="w-full py-3 mb-3 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-xl transition-colors font-medium flex justify-center items-center gap-2 shadow-sm">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-          </svg>
-          View Raw JSON Metadata
+        <button onclick="confirmDelete('${id}', false)" class="w-full py-3 mb-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl hover:bg-red-500/20 transition font-medium flex justify-center items-center gap-2 text-sm">
+          Delete Results Only
+        </button>
+        <button onclick="confirmDelete('${id}', true)" class="w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl transition font-medium flex justify-center items-center gap-2 text-sm">
+          Delete Results & PDF
         </button>
       </div>
 
-      <!-- MACHINES PANEL (2/3 width) -->
       <div class="lg:col-span-2 glass p-8 rounded-3xl border border-slate-700/50 shadow-xl">
-        <h2 class="text-xl font-bold mb-6 text-white flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-          </svg>
-          Detected Machines (${data.num_machines})
-        </h2>
+        <h2 class="text-xl font-bold mb-6 text-white">Machines (${data.num_machines || 0})</h2>
         <div class="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
           ${machinesHTML}
         </div>
       </div>
-
-    </div>
-
-    <!-- DANGER ZONE -->
-    <div class="glass mt-10 p-8 rounded-3xl border border-red-500/30 overflow-hidden relative">
-      <div class="absolute inset-x-0 top-0 h-1 bg-red-500/50"></div>
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div>
-          <h2 class="text-red-400 text-xl font-bold mb-2 flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            Danger Zone
-          </h2>
-          <p class="text-slate-400 text-sm max-w-xl">Deleting resources is permanent. Once deleted, they cannot be recovered. Choose whether to remove just the results or the original source PDF as well.</p>
-        </div>
-
-        <div class="flex flex-wrap gap-4 shrink-0">
-          <button onclick="confirmDelete('${id}', false)" class="px-5 py-2.5 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl hover:bg-red-500/20 hover:text-red-300 transition font-medium flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            Delete Results Only
-          </button>
-
-          <button onclick="confirmDelete('${id}', true)" class="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white shadow shadow-red-500/20 rounded-xl transition font-medium flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            Delete Results & PDF
-          </button>
-        </div>
-      </div>
-    </div>
-    `;
+    </div>`;
 
   } catch (error) {
     document.getElementById("content").innerHTML = `
-      <div class="text-red-400 p-6 glass rounded-2xl border border-red-500/30 flex items-center gap-3">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+      <div class="text-red-400 p-6 glass rounded-2xl border border-red-500/30">
         Error loading extraction data: ${error.message}
-      </div>
-    `;
+      </div>`;
     document.getElementById("title").innerText = "Error";
-    document.getElementById("header-status").className = "hidden";
   }
 }
 

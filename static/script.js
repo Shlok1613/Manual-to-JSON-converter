@@ -258,9 +258,14 @@ async function startExtraction() {
     const data = await response.json();
 
     if (response.ok) {
-      showToast("Extraction successful!", "success");
+      const hasExcels = data.excel_files && data.excel_files.length > 0;
+      if (hasExcels) {
+        showToast("Extraction successful!", "success");
+      } else {
+        showToast("Extraction completed but no Excel files were generated. Check PDF quality or API key.", "error");
+      }
       if (resultDiv) {
-        resultDiv.innerHTML = `
+        resultDiv.innerHTML = hasExcels ? `
           <div class="bg-emerald-900/20 border border-emerald-500/30 p-5 rounded-2xl shadow-lg animate-fade-in-up">
             <div class="flex items-center gap-3 mb-3">
               <div class="p-1.5 bg-emerald-500/20 rounded-full text-emerald-400">
@@ -287,6 +292,18 @@ async function startExtraction() {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
               </svg>
             </button>
+          </div>
+        ` : `
+          <div class="bg-red-900/20 border border-red-500/30 p-5 rounded-2xl shadow-lg animate-fade-in-up">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="p-1.5 bg-red-500/20 rounded-full text-red-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 class="font-bold text-red-400">No Output Generated</h3>
+            </div>
+            <p class="text-slate-400 text-sm">The extraction ran but produced no Excel files. Check that the Gemini API key is valid and the PDF contains readable procedure pages.</p>
           </div>
         `;
       }
@@ -321,11 +338,20 @@ style.textContent = `
 document.head.appendChild(style);
 
 
+function downloadExcel(url, filename) {
+  showToast(`Downloading ${filename}...`, 'success');
+  const link = document.createElement('a');
+  link.href = `${API}${url}`;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 async function loadHistory() {
   const historyContainer = document.getElementById("history");
   if (!historyContainer) return;
 
-  // Show skeletons
   historyContainer.innerHTML = Array(3).fill(0).map(() => `
     <div class="p-4 rounded-xl bg-slate-800/40 border border-slate-700/50 animate-pulse flex justify-between items-center">
       <div class="flex items-center gap-3">
@@ -341,62 +367,84 @@ async function loadHistory() {
 
   try {
     const response = await fetch(`${API}/api/extractions`);
-    const data = await response.json();
+    const extractions = await response.json();
 
-    if (data.extractions.length === 0) {
+    if (!Array.isArray(extractions) || extractions.length === 0) {
       historyContainer.innerHTML = `
         <div class="text-center py-10 text-slate-500">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-          </svg>
           <p>No extractions found.</p>
-        </div>
-      `;
+        </div>`;
       return;
     }
 
     let html = "";
-    data.extractions.forEach(ext => {
-      // Determine status icon and color
+    extractions.forEach(ext => {
+      const machineName = (ext.machines && ext.machines[0]) || ext.extraction_id;
+      const date = ext.timestamp ? new Date(ext.timestamp).toLocaleDateString() : "-";
       const isFailed = ext.status === 'failed';
       const statusColor = isFailed ? 'text-red-400' : 'text-emerald-400';
       const bgColor = isFailed ? 'bg-red-400/10' : 'bg-emerald-400/10';
-      const icon = isFailed 
-        ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`
-        : `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
+
+      const allFiles = ext.excel_files || [];
+      const consolidatedFile = allFiles.find(f => f.includes('_All_CatID'));
+      const downloadAllBtn = consolidatedFile
+        ? `<button onclick="event.stopPropagation(); downloadExcel('/api/download/${ext.extraction_id}/${consolidatedFile}', '${consolidatedFile}')"
+             class="px-3 py-1.5 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 rounded-lg transition border border-cyan-500/20 text-xs font-medium whitespace-nowrap">
+             Download Full
+           </button>`
+        : '';
+
+      const machineSummary = ext.machine_summary || [];
+      let variantRows = '';
+      machineSummary.forEach(m => {
+        (m.variants || []).forEach(variant => {
+          const variantFile = allFiles.find(f =>
+            f.includes(`_${m.machine}_${variant}.xlsx`) ||
+            f.endsWith(`_${variant}.xlsx`)
+          );
+          const dlBtn = variantFile
+            ? `<button onclick="event.stopPropagation(); downloadExcel('/api/download/${ext.extraction_id}/${variantFile}', '${variantFile}')"
+                 class="px-2 py-1 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg transition border border-purple-500/20 text-xs font-medium">
+                 Download
+               </button>`
+            : '';
+          variantRows += `
+            <div class="flex justify-between items-center px-4 py-2 bg-slate-800/20 border-l-2 border-purple-500/30 ml-8 rounded-r-lg">
+              <span class="text-sm text-purple-300 font-medium">${variant}</span>
+              ${dlBtn}
+            </div>`;
+        });
+      });
 
       html += `
-        <div id="ext-item-${ext.extraction_id}" class="group p-4 rounded-xl bg-slate-800/30 border border-slate-700/50 hover:bg-slate-700/30 hover:border-cyan-500/30 transition-all duration-300 flex justify-between items-center cursor-pointer shadow-sm hover:shadow-cyan-900/10" onclick="viewExtraction('${ext.extraction_id}')">
-          
-          <div class="flex items-center gap-4">
-            <div class="p-2 rounded-lg ${bgColor} ${statusColor}">
-              ${icon}
-            </div>
-            <div>
-              <p class="font-semibold text-slate-200 truncate max-w-[200px] md:max-w-xs" title="${ext.original_filename}">${ext.original_filename}</p>
-              <div class="flex items-center gap-2 mt-1">
-                <span class="text-xs font-mono text-slate-500 bg-slate-800 px-2 py-0.5 rounded">${ext.extraction_id.split('_')[1] || ext.extraction_id}</span>
-                <span class="text-[10px] text-slate-400">${new Date(ext.uploaded_at).toLocaleDateString()}</span>
+        <div id="ext-item-${ext.extraction_id}" class="group bg-slate-800/30 border border-slate-700/50 hover:border-cyan-500/30 transition-all duration-300 rounded-xl overflow-hidden shadow-sm">
+          <div class="flex justify-between items-center p-4 cursor-pointer" onclick="toggleVariants('${ext.extraction_id}')">
+            <div class="flex items-center gap-4 flex-1 cursor-pointer" onclick="viewExtraction('${ext.extraction_id}')">
+              <div class="p-2 rounded-lg ${bgColor} ${statusColor}">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <p class="font-semibold text-slate-200">${machineName}</p>
+                <div class="flex items-center gap-2 mt-1">
+                  <span class="text-xs font-mono text-slate-500 bg-slate-800 px-2 py-0.5 rounded">${ext.extraction_id}</span>
+                  <span class="text-[10px] text-slate-400">${date}</span>
+                </div>
               </div>
             </div>
-          </div>
-
-          <div class="flex items-center gap-4">
-            <div class="text-right hidden sm:block">
-              <span class="text-cyan-400 font-medium">${ext.num_machines || 0}</span>
-              <span class="text-xs text-slate-500 block">machines</span>
+            <div class="flex items-center gap-3">
+              ${downloadAllBtn}
+              <button onclick="event.stopPropagation(); confirmDelete('${ext.extraction_id}', event)"
+                class="p-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition opacity-0 group-hover:opacity-100">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
             </div>
-            
-            <!-- DELETE BUTTON -->
-            <button onclick="confirmDelete('${ext.extraction_id}', event)" class="p-2 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100" title="Delete Extraction">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </button>
           </div>
-
-        </div>
-      `;
+          ${variantRows ? `<div id="variants-${ext.extraction_id}" class="border-t border-slate-700/50 py-2 space-y-1">${variantRows}</div>` : ''}
+        </div>`;
     });
 
     historyContainer.innerHTML = html;
@@ -405,22 +453,24 @@ async function loadHistory() {
   }
 }
 
+function toggleVariants(id) {
+  const el = document.getElementById(`variants-${id}`);
+  if (el) el.classList.toggle('hidden');
+}
+
 async function loadAnalytics() {
   try {
     const response = await fetch(`${API}/api/extractions`);
-    const data = await response.json();
-    
-    // Animate numbers if element exists
+    const extractions = await response.json();
+    if (!Array.isArray(extractions)) return;
+
     const totalExtEl = document.getElementById("totalExtractions");
     const totalMachEl = document.getElementById("totalMachines");
-    
-    if (totalExtEl) totalExtEl.innerText = data.total;
+
+    if (totalExtEl) totalExtEl.innerText = extractions.length;
 
     let machineCount = 0;
-    data.extractions.forEach(ext => {
-      machineCount += ext.num_machines || 0;
-    });
-
+    extractions.forEach(ext => { machineCount += ext.num_machines || 0; });
     if (totalMachEl) totalMachEl.innerText = machineCount;
   } catch (err) {
     console.error("Failed to load analytics");
