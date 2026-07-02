@@ -1,226 +1,373 @@
-# Smart Manufacturing Extraction Engine
+# Bridging the Gap: Turning Human Know-How into JSON for Smart Manufacturing
 
-A web-based system that converts industrial manufacturing Work Instruction (WI) PDFs into structured Excel test specification files for factory floor operators.
-
-Built for GIC — a manufacturer of industrial voltage monitoring relays.
-
----
-
-## The Problem
-
-GIC produces voltage monitoring relays (SPPR, SM500, DMS120, MAG03D series, etc.). Each product has a functional testing procedure documented in a PDF manual. These manuals contain 8–10 products mixed together across 20–60 pages.
-
-Before this system, factory operators manually read these PDFs to extract test parameters — UV/OV voltage ranges, delays, LED states, relay behavior — and filled in Excel test sheets by hand. This was:
-
-- Time-consuming and error-prone
-- Inconsistent across operators
-- Not scalable when new product variants were added
-- Impossible to automate with simple copy-paste due to mixed product sections
-
-The target output was a specific Excel template already in use on the factory floor — a multi-row format where each test condition spans 5 rows covering voltage settings, LED statuses, relay behavior, and delays.
+**Phase 1 — Industrial PDF to Structured Excel**  
+Industry Partner: General Industrial Controls (GIC), Pune  
+Institution: M.E.S. Wadia College of Engineering, SPPU  
+Academic Year: 2025–2026  
+Team: Shlok Shah (72237288E) · Ishwari Surwase (72237329F)  
+Guide: Prof. Yogita Ajgar
 
 ---
 
-## What Was Planned
+## What This System Does
 
-1. Upload a PDF → parse it → generate one Excel per machine
-2. Match the exact factory Excel template format
-3. Handle both regular PDFs and scanned/OCR-based ZIPs
-4. Support all product families without hardcoding machine-specific logic
-5. Track extraction history with a database
-6. Let users control which machines to extract
+GIC manufactures voltage monitoring relays. Testing each relay requires following a Work Instruction PDF — a 62-page document containing DIP switch settings, voltage thresholds, LED states, relay timings, and test procedure steps across 6 product variants.
 
----
+Before this project, workers manually read the PDF and typed all values into Excel sheets. This was slow, error-prone, and could not scale.
 
-## What Was Built
+This system automates that process entirely:
 
-### Architecture
+1. Operator uploads a PDF through the browser interface
+2. System rasterises each page to a 300 DPI image
+3. Google Gemini 2.5 Flash reads each image and extracts structured data
+4. Data is validated, normalised, and written into an Excel workbook
+5. Operator downloads the Excel and uses it directly on the factory floor
 
-```
-PDF Upload
-    ↓
-pdf_extractor.py        — text extraction (pdfplumber + PyMuPDF fallback + ZIP/OCR)
-    ↓
-block_segmenter.py      — splits full text into per-machine blocks
-    ↓
-universal_spec_extractor.py  — extracts voltage specs from each block
-    ↓
-excel_writer.py         — writes structured Excel with 5-row condition format
-    ↓
-Output: one .xlsx per machine
-```
-
-### Frontend
-
-Vanilla JS + Tailwind CSS. No framework.
-
-- Upload interface with drag-and-drop
-- Machine name input modal — user specifies which machines to extract before processing starts
-- Extraction history with unique IDs
-- Per-extraction delete: results only (keeps PDF and DB entry) or full delete
-- Download individual Excel files per machine
-- Analytics: total extractions, machines processed
-
-### Backend
-
-FastAPI + SQLite + SQLAlchemy.
-
-- `POST /api/extract` — accepts PDF + optional machine names, returns extraction ID
-- `GET /api/extractions` — lists all extractions from database
-- `GET /api/files/{id}` — lists Excel files for one extraction
-- `GET /api/download/{id}/{filename}` — download a specific Excel file
-- `DELETE /api/extraction/{id}` — delete results or full extraction
-- `GET /api/pdf/{id}` — download original PDF
-- `GET /health` — server health check
+No manual reading. No copy-paste. No human transcription errors.
 
 ---
 
-## Key Technical Decisions
+## Accuracy Results (Validated Against GIC Reference Excel)
 
-### Three PDF formats, one extractor
+| Variant | Accuracy | Status |
+|---------|----------|--------|
+| MAG03D0428 | 99.4% | ✅ PASS |
+| MAG03D0427 | 97.5% | ✅ PASS |
+| MAG03D0424EG | 93.0% | ✅ PASS |
+| MAG03D0426 | 92.7% | ✅ PASS |
+| MAG03D0424 | 92.5% | ✅ PASS |
+| MAG03D0425 | 21.3% | ⚠️ Accepted — documented architectural ceiling |
 
-The PDFs came in three data formats:
+**Functional Testing PDF (6 machine families):** All 6 at CLEAN status ✅
 
-- **Format A** — table inline: `"Under Voltage (UV): 347 to 357 VAC"`
-- **Format B** — procedure text: `"range of 220.8V to 225.6V"`
-- **Format C** — PCT inline: `"85% (353 VAC) 343 TO 363 VAC"`
-
-Instead of branching logic per format, `universal_spec_extractor.py` tries all three patterns for every block. Whichever finds data wins. This means the same extractor works on all PDFs without knowing the format in advance.
-
-### 5-row Excel format
-
-Each test condition in the output spans exactly 5 rows:
-
-```
-Row 1: condition name | POT | RN voltage  | PWR LED  | relay | on delay | off delay
-Row 2:                |     | YN voltage  | UV LED   |
-Row 3:                |     | BN voltage  | OV LED   |
-Row 4:                |     |             | ASY LED  |
-Row 5: (blank spacer)
-```
-
-This matches the factory template exactly. The `_write_condition_5row()` function in `excel_writer.py` handles this.
-
-### Block segmentation
-
-`block_segmenter.py` uses regex patterns to detect section headers (`PROCESS:`, `Functional Testing`, `For MG73BQ product`, etc.) and splits the PDF into per-machine text blocks. Key safeguards:
-
-- Minimum block size (1000 chars) prevents premature splits
-- Table reference check — won't split if a table reference was just made but no table has appeared yet
-- Short block merging — blocks under 1500 chars with no table spec are merged with the next block
-
-### SCOPE-based documents (WI.pdf)
-
-Some PDFs (WI.pdf) are ZIP archives containing JPEG page scans + OCR text files. `pdf_extractor.py` detects this and reads from the text files directly.
-
-These documents use a SCOPE line (`SCOPE : MAG03D0424 / MAG03D0425 / ...`) to identify products. When 70%+ of auto-detected blocks share the same name, SCOPE mode fires — it reads the SCOPE line, extracts all product names, and creates one block per product sharing the full combined text.
-
-### User-provided machine names
-
-When a PDF has unknown machine names (not matching any known prefix), the user can type the machine names manually via the modal. The segmenter:
-
-1. Validates each name against the full PDF text (case-insensitive)
-2. Silently ignores names not found
-3. Falls back to auto-detection if all names are invalid
-4. After standard segmentation, filters blocks to only those matching user names
-5. Merges multiple same-named blocks into one
-
----
-
-## Extraction Results
-
-| Machine | Conditions Generated | Notes |
-|---|---|---|
-| SPPR | 28 | UV×2 sets, OV×2, ASY, phase, neutral |
-| SM301 | 2 | Automated jig — no voltage specs extractable |
-| SM500 | 20 | UV, OV, ASY, phase |
-| SM500_A | 20 | Same structure as SM500 |
-| SM501_B | 24 | UV, OV, ASY, phase, neutral |
-| DSMR | 24 | UV, OV, ASY, phase reverse |
-| DMS120 | 24 | UV, OV, ASY, phase |
-| DMS12024 | 24 | UV, OV, ASY, phase, neutral |
-| MAG03D0424–0428 | 34 each | LV/HV cutoffs, phase fail/reverse |
-
-Both input PDFs handled:
-- `FUnctional_Testing_WI_Five_series.pdf` — 20 pages, 9 machines, standard PDF
-- `WI.pdf` — 62 pages, 5 MAG03D machines, ZIP/OCR format
-
----
-
-## Known Limitations
-
-**SCOPE documents produce identical output per machine.** When WI.pdf is processed in SCOPE mode, all 5 MAG machines share the same combined text blob. The extractor finds mixed specs from all machines and generates the same conditions for each. The factory template was created manually — someone who knew each machine's specs filled it in by hand. The PDF itself doesn't cleanly separate per-machine specs in a way the extractor can isolate.
-
-The FUnctional_Testing PDF works correctly because each machine has its own clearly delimited section.
-
-**POT setting column is always empty.** The POT settings (P1, P2, P3) are physical knob positions on the test jig — not written in the PDF. Operators fill this column manually.
-
-**SM301 produces only 2 conditions.** This is correct behavior — SM301 is an automated jig test with no voltage specifications in the PDF.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | Python 3.12, FastAPI |
-| PDF extraction | pdfplumber (primary), PyMuPDF (fallback), zipfile (OCR/ZIP) |
-| Excel generation | openpyxl |
-| Database | SQLite + SQLAlchemy |
-| Frontend | Vanilla JavaScript, Tailwind CSS |
-| Server | Uvicorn |
+Accuracy is cell-level match against GIC's own reference Excel (`1M_SPP_SM175_AUTO_FUNCTION_All_CatID.xlsx`). Target threshold: 90%.
 
 ---
 
 ## Project Structure
 
 ```
-backend/
-├── main.py                          # FastAPI app, all endpoints
-├── requirements.txt
-├── database.py                      # SQLAlchemy engine + session
+Manual-to-JSON-converter/
+│
+├── main.py                          # FastAPI application — entry point
+├── database.py                      # SQLAlchemy engine and session setup
+├── requirements.txt                 # Python dependencies
+├── .env                             # GEMINI_API_KEY (never commit this)
+│
 ├── models/
-│   ├── schemas.py                   # Pydantic models, ID generation
-│   └── db_models.py                 # SQLAlchemy ORM models
+│   ├── db_models.py                 # SQLAlchemy ORM model (ExtractionDB)
+│   └── schemas.py                   # Pydantic response schemas
+│
 ├── services/
-│   ├── pdf_extractor.py             # PDF text extraction
-│   ├── block_segmenter.py           # Per-machine text splitting
-│   ├── universal_spec_extractor.py  # Voltage/spec extraction + condition generation
-│   ├── condition_generator.py       # Delegates to universal extractor
-│   └── excel_writer.py             # Excel file generation
+│   ├── types.py                     # Shared dataclasses: Page, Block, Specs, TestStep, VariantData
+│   ├── pdf_extractor.py             # PDF ingestion — text layer + 300 DPI rasterisation
+│   ├── block_segmenter.py           # Layout classification and variant boundary detection
+│   ├── vision_extractor.py          # ⚠️ FROZEN — Gemini vision extraction (WI pipeline)
+│   ├── functional_extractor.py      # ⚠️ FROZEN — Gemini extraction (Functional pipeline)
+│   ├── enricher.py                  # Structural metadata enrichment
+│   ├── normalizer.py                # Unit and format standardisation
+│   ├── spec_linker.py               # Maps extracted fields to output schema
+│   ├── template_writer.py           # Excel generation via OpenPyXL
+│   ├── validator.py                 # Deterministic validation rules
+│   ├── delay_utils.py               # Shared delay validation helpers
+│   ├── table_extractor.py           # Variant detection from text
+│   ├── table_grid_extractor.py      # Grid parsing from OCR text
+│   ├── table_parser.py              # Table page detection
+│   └── variant_mapper.py            # Column-per-variant matrix parsing
+│
 ├── static/
-│   ├── index.html                   # Main upload + history UI
-│   ├── extraction.html              # Per-extraction detail + download UI
-│   └── script.js                   # Frontend logic
-├── uploads/                         # Uploaded PDFs (gitignored)
-├── outputs/                         # Generated Excel files (gitignored)
-└── metadata/                        # Extraction metadata JSONs (gitignored)
+│   ├── index.html                   # Dashboard — upload and history
+│   ├── extraction.html              # Extraction detail and download page
+│   └── script.js                    # Frontend JavaScript
+│
+├── tests/
+│   └── test_single_machine.py       # Single-variant extraction test runner
+│
+├── tools/
+│   └── compare_excel.py             # Cell-level accuracy measurement tool
+│
+├── source/                          # Source documents (not committed to git)
+│   ├── WI.pdf
+│   ├── FUnctional_Testing_WI_Five_series.pdf
+│   └── 1M_SPP_SM175_AUTO_FUNCTION_All_CatID.xlsx
+│
+├── outputs/                         # Generated Excel files (runtime)
+├── uploads/                         # Uploaded PDFs (runtime)
+├── metadata/                        # Extraction run metadata JSON (runtime)
+│
+├── RULE.md                          # Architectural integrity rules (no hardcoding)
+├── BUG_LOG.md                       # Root cause analysis for all known issues
+└── README.md                        # This file
 ```
 
 ---
 
-## Running the Project
+## How It Works — Pipeline Overview
+
+```
+PDF Upload
+    │
+    ▼
+pdf_extractor.py
+    ├── Text layer (pdfplumber) → layout classification signals
+    └── 300 DPI images (pdf2image + Poppler) → sent to Gemini
+    │
+    ▼
+block_segmenter.py
+    ├── Detects document type (WI page-per-variant vs Functional matrix)
+    ├── Finds variant boundaries using SCOPE line and heading regex
+    └── Returns: List of Block objects, each = one machine + its pages
+    │
+    ▼
+    ├── WI PDF → vision_extractor.py (FROZEN)
+    │       ├── Specs extraction: 4 spec pages → Gemini → JSON
+    │       ├── Procedure extraction: 3–6 proc pages → Gemini → JSON steps
+    │       └── Step count validation + retry (up to 4 retries)
+    │
+    └── Functional PDF → functional_extractor.py (FROZEN)
+            ├── Matrix detection: column headers = sub-machine names
+            ├── Row-by-row parameter extraction per sub-machine
+            └── Merged cell handling: shared values copied to all covered variants
+    │
+    ▼
+enricher.py → normalizer.py → spec_linker.py → validator.py
+    │
+    ▼
+template_writer.py
+    ├── Auto-detects Layout A (DIP switch, 4 LEDs) or Layout B (single LED, cutoff)
+    ├── Generates one sheet per variant
+    └── Saves consolidated .xlsx (all variants) + individual .xlsx per variant
+    │
+    ▼
+FastAPI → SQLite → Browser UI → Operator downloads Excel
+```
+
+---
+
+## Prerequisites
+
+- Python 3.10+
+- Node is not required
+- Poppler (required by pdf2image for PDF rasterisation)
+- A valid Google Gemini API key
+
+### Install Poppler (Windows)
+
+Download from: https://github.com/oschwartz10612/poppler-windows/releases
+
+Extract the zip. Add the `bin` folder to your system PATH.
+
+Example: if you extracted to `C:\poppler-25.01.0`, add `C:\poppler-25.01.0\Library\bin` to PATH.
+
+Verify: open a new terminal and run `pdftoppm -v`. You should see a version number.
+
+### Install Poppler (Linux/Mac)
 
 ```bash
-cd backend
+# Ubuntu / Debian
+sudo apt-get install poppler-utils
+
+# macOS
+brew install poppler
+```
+
+---
+
+## Installation
+
+```bash
+# 1. Clone the repository
+git clone <repo-url>
+cd Manual-to-JSON-converter
+
+# 2. Create and activate a virtual environment
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# Linux / Mac
+source .venv/bin/activate
+
+# 3. Install Python dependencies
 pip install -r requirements.txt
+
+# 4. Create the .env file and add your Gemini API key
+echo GEMINI_API_KEY=your_key_here > .env
+```
+
+---
+
+## Requirements
+
+Create a `requirements.txt` with these packages:
+
+```
+fastapi
+uvicorn[standard]
+python-dotenv
+pdfplumber
+pdf2image
+google-generativeai
+openpyxl
+sqlalchemy
+pydantic
+python-multipart
+```
+
+---
+
+## Running the System
+
+```bash
+# Activate virtual environment first
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate       # Linux / Mac
+
+# Start the server
 uvicorn main:app --reload
 ```
 
-Open `http://127.0.0.1:8000` in your browser.
+Open your browser and go to: **http://127.0.0.1:8000**
+
+The `--reload` flag restarts the server automatically when code files change. Remove it for production.
 
 ---
 
-## Future Goals
+## Using the Interface
 
-**LLM integration for SCOPE documents.** The biggest remaining gap — different MAG machines produce identical output. An LLM call after text extraction, before segmentation, could read the full document and return per-machine spec summaries. This would fix the SCOPE output problem without changing the rest of the pipeline.
+### Upload and Extract
 
-**Auto machine name detection.** Currently users type machine names manually for unknown PDFs. An LLM reading the first 2–3 pages could return the machine list automatically, eliminating the manual step entirely.
+1. Open http://127.0.0.1:8000
+2. Drag and drop a PDF onto the upload zone (or click to browse)
+3. Click **Extract Specifications**
+4. A modal will ask for machine names — enter the machine name (e.g. `MAG03D0427`) or leave blank for auto-detection
+5. Click **Start Extraction**
+6. Wait for the extraction to complete (typically 60–120 seconds per variant)
+7. The result card will appear showing machine count and extraction ID
 
-**NLP-based block segmentation.** A custom spaCy model trained on GIC PDFs could replace the regex SECTION_PATTERNS entirely — catching any product code format without needing prefix lists or user input.
+### Download Results
 
-**POT setting extraction.** If a future PDF version includes POT settings in the procedure text, the extractor could be extended to populate column G automatically.
+- The **Recent Activity** panel shows all past extractions
+- Each card shows the machine name, date, and a **Download Full** button (consolidated Excel with all variants as sheets)
+- Expand a card to see individual variants, each with its own **Download** button
+- Click a card's machine name to go to the extraction detail page
 
-**Batch upload.** Currently one PDF per upload. Multiple PDFs could be queued and processed in the background.
+### Extraction Detail Page
 
-**REST API for MES/ERP integration.** The existing FastAPI backend is already structured for this — adding authentication and a formal API spec would allow factory systems to trigger extractions programmatically.
+- Accessible by clicking the machine name on any history card
+- Shows: pages processed, machines found, extraction date
+- Lists each machine with expandable variant list
+- Each variant has an individual download button
+- Delete options at the bottom: delete results only, or delete results and original PDF
+
+---
+
+## Testing Accuracy
+
+To test extraction accuracy for a specific variant against the reference Excel:
+
+```bash
+# Run extraction for a single variant (uses existing WI.pdf in source/)
+python -m tests.test_single_machine MAG03D0427
+
+# Compare generated Excel against reference
+python tools/compare_excel.py outputs/MAG03D0427.xlsx "source/1M SPP SM175 AUTO FUNCTION All CatID.xlsx" MAG03D0427
+```
+
+The compare tool reports:
+- **Correct** — exact cell matches
+- **Wrong** — cells present but value differs
+- **Missing** — cells expected but not generated
+- **Extra** — cells generated but not in reference
+- **Overall %** — correct / total reference cells
+
+Target: ≥ 90% for production acceptance.
+
+---
+
+## Frozen Modules
+
+`vision_extractor.py` and `functional_extractor.py` are **frozen**.
+
+This means: do not edit these files. They produce validated extraction results for passing variants. Any change risks accuracy regression on variants that currently pass 90%.
+
+If a new variant or document type needs to be supported, validate it in a separate branch, confirm accuracy with `compare_excel.py`, and only then merge.
+
+All other modules (enricher, normaliser, template_writer, validator, block_segmenter) can be modified. After any change to these modules, run the compare tool against the frozen baseline outputs to confirm no regression.
+
+---
+
+## Design Rules (RULE.md summary)
+
+The full rules are in `RULE.md`. The most critical:
+
+**R1 — No hardcoded extracted values.** Every value in the output must come from Gemini reading the source PDF. No values are injected based on variant name, step name, or expected range.
+
+**R3 — No per-variant branching in extraction code.** The extractors must generalise. A solution that works by detecting the variant name and applying different logic is not a solution.
+
+**R4 — Prompt engineering has a ceiling.** When a problem requires arithmetic (e.g. voltage × √3), the fix is a Python post-processing module, not a larger prompt.
+
+**R5 — Freeze before refactor.** Save frozen baseline outputs before any refactoring pass. Run compare after to confirm no regression.
+
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GEMINI_API_KEY` | Yes | Google Gemini API key. Get one at https://aistudio.google.com |
+
+The `.env` file is loaded automatically at startup via `python-dotenv`. Never commit `.env` to git.
+
+---
+
+## Known Limitations
+
+| Issue | Status |
+|-------|--------|
+| MAG03D0425 at 21.3% | Accepted. Requires √3 voltage arithmetic post-processing not yet implemented. |
+| SM500 kind-flip requires manual step | Documented. Automated kind detection on Phase 2 roadmap. |
+| Gemini API key required per extraction run | Key rotation strategy on Phase 2 roadmap. |
+
+---
+
+## Phase 2 Roadmap
+
+Phase 1 output: Excel workbooks for factory floor use.  
+Phase 2 output: Structured JSON for ERP/MES system integration.
+
+Planned additions:
+- JSON serialisation path in `template_writer.py` alongside existing Excel path
+- `/api/extract` `output_format` parameter: `excel`, `json`, or `both`
+- Webhook endpoint to POST extracted JSON to configured ERP on completion
+- Python arithmetic module for MAG03D0425 voltage threshold derivation
+- Automated kind-flip detection for SM500
+- Cell-level accuracy measurement for Functional pipeline
+
+---
+
+## Technology Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Vision AI | Google Gemini 2.5 Flash | PDF page interpretation and structured extraction |
+| PDF Text | pdfplumber | Text layer extraction for layout classification |
+| PDF Raster | pdf2image + Poppler | 300 DPI page images for vision AI |
+| Backend | FastAPI + Uvicorn | REST API, file handling, pipeline orchestration |
+| Database | SQLite (extractions.db) | Run history, machine names, file paths |
+| Excel Output | OpenPyXL | Structured workbook generation |
+| Frontend | HTML5 + JavaScript | Operator upload and download interface |
+| Language | Python 3.10+ | All pipeline modules |
+
+The system does **not** use: Tesseract OCR, Pandas, NumPy, or any ML training pipeline. All intelligence comes from Gemini's pre-trained vision capability applied to rasterised page images.
+
+---
+
+## Academic Context
+
+This project was developed as a final year B.E. (Electronics & Telecommunication) capstone at M.E.S. Wadia College of Engineering, Pune (SPPU), in collaboration with General Industrial Controls (GIC), Pune.
+
+Project title: *Bridging the Gap: Turning Human Know-How into JSON for Smart Manufacturing*  
+Phase 1 scope: PDF to structured Excel  
+Phase 2 scope (planned): Excel to JSON for ERP/MES integration
